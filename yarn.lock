@@ -1514,6 +1514,8 @@ __metadata:
     "@nomiclabs/hardhat-ethers": ^2.0.2
     "@nomiclabs/hardhat-etherscan": ^2.1.8
     "@nomiclabs/hardhat-waffle": ^2.0.1
+    "@openzeppelin/contracts": ^4.4.1
+    "@rari-capital/solmate": ^6.2.0
     "@typechain/ethers-v5": ^8.0.5
     "@typechain/hardhat": ^3.0.0
     "@types/chai": ^4.2.22
@@ -1730,6 +1732,20 @@ __metadata:
     widest-line: ^3.1.0
     wrap-ansi: ^6.2.0
   checksum: 07c67a9ed32ea05a6407823325fac7379fdea2cd0b688ef927d6265f695c1e3707d13de6a706e2af5b1949ea4beb5720d11feb87e1f4323bfe5948846766d9e2
+  languageName: node
+  linkType: hard
+
+"@openzeppelin/contracts@npm:^4.4.1":
+  version: 4.4.1
+  resolution: "@openzeppelin/contracts@npm:4.4.1"
+  checksum: 87ee7ebe8e6493fc4d657b05c5ddb5f254b73bf55d80c25a790f8e74087b6d90c0a6ec504fe45949c27501f73bca7d64129aad29488707a2c9b5afdb035966df
+  languageName: node
+  linkType: hard
+
+"@rari-capital/solmate@npm:^6.2.0":
+  version: 6.2.0
+  resolution: "@rari-capital/solmate@npm:6.2.0"
+  checksum: a120cbb7d2828e35b5fd7d620871fd7f746c68a94f79be79fc153c665e6117e82ca3f22167e2143a84d7c5876784f9ad173efc51ace075e1332726d552c5e23e
   languageName: node
   linkType: hard
 
