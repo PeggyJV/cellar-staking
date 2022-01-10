@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 import "./Errors.sol";
+import "./interfaces/ICellarStaking.sol";
 
 /**
  * @title Sommelier Staking
@@ -93,16 +94,8 @@ import "./Errors.sol";
  *
  *
  */
-contract CellarStaking is Ownable {
+contract CellarStaking is ICellarStaking, Ownable {
     using SafeERC20 for ERC20;
-
-    // ============================================ EVENTS =============================================
-
-    event Funding(address stakingToken, address distributionToken, uint256 rewardAmount);
-    event Stake(address indexed user, uint256 depositId, uint256 amount);
-    event Unstake(address indexed user, uint256 depositId, uint256 amount);
-    event Claim(address indexed user, uint256 depositId, uint256 amount);
-    event EmergencyStop(address owner, bool claimable);
 
     // ============================================ STATE ==============================================
 
@@ -114,67 +107,39 @@ contract CellarStaking is Ownable {
     uint256 public constant TWO_WEEKS = ONE_WEEK * 2;
     uint256 public constant MAX_UINT = 2**256 - 1;
 
-    enum Lock {
-        day,
-        week,
-        twoWeeks
-    }
-
     uint256 public constant ONE_DAY_BOOST = 1e17; // 10% boost
     uint256 public constant ONE_WEEK_BOOST = 4e17; // 40% boost
     uint256 public constant TWO_WEEKS_BOOST = 1e18; // 100% boost
 
     // ============ Global State =============
 
-    ERC20 public immutable stakingToken;
-    ERC20 public immutable distributionToken;
+    ERC20 public immutable override stakingToken;
+    ERC20 public immutable override distributionToken;
 
-    uint256 public minimumDeposit = 0;
-    uint256 public startTimestamp;
-    uint256 public endTimestamp;
-    uint256 public totalDeposits;
-    uint256 public totalDepositsWithBoost;
-    uint256 public totalShares;
-    uint256 public totalShareSeconds;
-    uint256 public rewardsLeft;
+    uint256 public override minimumDeposit = 0;
+    uint256 public override startTimestamp;
+    uint256 public override endTimestamp;
+    uint256 public override totalDeposits;
+    uint256 public override totalDepositsWithBoost;
+    uint256 public override totalShares;
+    uint256 public override totalShareSeconds;
+    uint256 public override rewardsLeft;
 
     uint256 private lastAccountingTimestamp = block.timestamp;
     uint256 private immutable initialSharesPerToken = 1;
-
-    struct RewardEpoch {
-        uint256 startTimestamp;
-        uint256 duration;
-        uint256 totalRewards;
-        uint256 rewardsEarned;
-        uint256 shareSecondsAccumulated;
-    }
 
     RewardEpoch[] public rewardEpochs;
 
     /// @dev Limiting the maximum number of reward epochs protects against
     ///      issues with the block gas limit.
-    uint256 public immutable maxNumEpochs;
+    uint256 public immutable override maxNumEpochs;
 
     /// @notice Emergency states in case of contract malfunction.
-    bool public paused;
-    bool public ended;
-    bool public claimable;
+    bool public override paused;
+    bool public override ended;
+    bool public override claimable;
 
     // ============= User State ==============
-
-    struct UserStake {
-        uint256 amount;
-        uint256 amountWithBoost;
-        uint256 shares;
-        uint256 shareSecondsAccumulated;
-        /// @notice epochIndex => rewards
-        mapping(uint256 => uint256) rewardsEarnedByEpoch;
-        uint256 totalRewardsEarned;
-        uint256 rewardsClaimed;
-        uint256 unlockTimestamp;
-        uint256 lastAccountingTimestamp;
-        Lock lock;
-    }
 
     /// @notice user => depositId => UserInfo
     mapping(address => mapping(uint256 => UserStake)) public stakes;
@@ -218,6 +183,7 @@ contract CellarStaking is Ownable {
      */
     function stake(uint256 amount, Lock lock)
         external
+        override
         whenNotPaused
         checkSupplyAccounting
         updateTotalRewardAccounting
@@ -276,6 +242,7 @@ contract CellarStaking is Ownable {
      */
     function unstake(uint256 depositId, uint256 amount)
         external
+        override
         whenNotPaused
         checkSupplyAccounting
         updateTotalRewardAccounting
@@ -298,6 +265,7 @@ contract CellarStaking is Ownable {
      */
     function unstakeAll()
         external
+        override
         whenNotPaused
         checkSupplyAccounting
         updateTotalRewardAccounting
@@ -379,6 +347,7 @@ contract CellarStaking is Ownable {
      */
     function claim(uint256 depositId)
         external
+        override
         whenNotPaused
         checkSupplyAccounting
         updateTotalRewardAccounting
@@ -402,6 +371,7 @@ contract CellarStaking is Ownable {
      */
     function claimAll()
         external
+        override
         whenNotPaused
         checkSupplyAccounting
         updateTotalRewardAccounting
@@ -451,7 +421,7 @@ contract CellarStaking is Ownable {
      * @notice  Unstake and return all staked tokens to the caller.
      * @dev     In emergency node, staking time locks do not apply.
      */
-    function emergencyUnstake() external {
+    function emergencyUnstake() external override {
         if (!ended) revert STATE_NoEmergencyUnstake();
 
         uint256[] memory depositIds = allUserStakes[msg.sender];
@@ -470,7 +440,7 @@ contract CellarStaking is Ownable {
      *          so any earned amount is only retroactive to when the contract
      *          was active.
      */
-    function emergencyClaim() external {
+    function emergencyClaim() external override {
         if (!ended) revert STATE_NoEmergencyUnstake();
         if (!claimable) revert STATE_NoEmergencyClaim();
 
@@ -500,7 +470,7 @@ contract CellarStaking is Ownable {
         uint256 _rewardsPerEpoch,
         uint256 _epochLength,
         uint256 _numEpochs
-    ) external whenNotPaused onlyOwner {
+    ) external override whenNotPaused onlyOwner {
         if (startTimestamp > 0) revert STATE_AlreadyInitialized();
         if (_numEpochs == 0) revert USR_NoEpochs();
         if (_numEpochs > maxNumEpochs) revert USR_TooManyEpochs(_numEpochs, maxNumEpochs);
@@ -538,7 +508,7 @@ contract CellarStaking is Ownable {
         uint256 _rewardsPerEpoch,
         uint256 _epochLength,
         uint256 _numEpochs
-    ) external whenNotPaused onlyOwner {
+    ) external override whenNotPaused onlyOwner {
         if (startTimestamp == 0) revert STATE_NotInitialized();
         if (_numEpochs == 0) revert USR_NoEpochs();
         if (rewardEpochs.length + _numEpochs > maxNumEpochs)
@@ -573,7 +543,7 @@ contract CellarStaking is Ownable {
      *
      * @param _minimum              The minimum deposit for each new stake.
      */
-    function updateMinimumDeposit(uint256 _minimum) external onlyOwner {
+    function updateMinimumDeposit(uint256 _minimum) external override onlyOwner {
         minimumDeposit = _minimum;
     }
 
@@ -584,7 +554,7 @@ contract CellarStaking is Ownable {
      *
      * @param _paused               Whether the contract should be paused.
      */
-    function setPaused(bool _paused) external onlyOwner {
+    function setPaused(bool _paused) external override onlyOwner {
         paused = _paused;
     }
 
@@ -596,7 +566,7 @@ contract CellarStaking is Ownable {
      *
      * @param makeRewardsClaimable  Whether any previously accumulated rewards should be claimable.
      */
-    function emergencyStop(bool makeRewardsClaimable) external onlyOwner {
+    function emergencyStop(bool makeRewardsClaimable) external override onlyOwner {
         if (ended) revert STATE_AlreadyStopped();
 
         // Update state and put in irreversible emergency mode
@@ -618,7 +588,7 @@ contract CellarStaking is Ownable {
      *
      * @return The index of the currently active epoch.
      */
-    function currentEpoch() public view returns (uint256) {
+    function currentEpoch() public view override returns (uint256) {
         return epochAtTime(block.timestamp);
     }
 
@@ -630,7 +600,7 @@ contract CellarStaking is Ownable {
      *
      * @return epochIdx             The index of the currently active epoch.
      */
-    function epochAtTime(uint256 timestamp) public view returns (uint256 epochIdx) {
+    function epochAtTime(uint256 timestamp) public view override returns (uint256 epochIdx) {
         // Return current epoch index
         uint256 timeElapsed = timestamp - startTimestamp;
 
@@ -657,12 +627,74 @@ contract CellarStaking is Ownable {
      *
      * @return amount               The total amount of rewards for the staking schedule.
      */
-    function totalRewards() public view returns (uint256 amount) {
+    function totalRewards() public view override returns (uint256 amount) {
         amount = 0;
 
         for (uint256 i = 0; i < rewardEpochs.length; i++) {
             amount += rewardEpochs[i].totalRewards;
         }
+    }
+
+    /**
+     * @notice Returns user stake info.
+     * @dev    Used to circumvent limitations around returning nested mappings.
+     *
+     * @param user                  The user to query.
+     * @param depositId             The depositId for the user used to look up the stake.
+     *
+     * @return                      The stake information for the specified depositId;
+     */
+    function getUserStake(address user, uint256 depositId) public view override returns (UserStake memory) {
+        return stakes[user][depositId];
+    }
+
+    /**
+     * @notice Returns list of deposit IDs for user.
+     * @dev    Used to circumvent limitations around returning complex types.
+     *
+     * @param user                  The user to query.
+     *
+     * @return                      The list of deposit IDs.
+     */
+    function getAllUserStakes(address user) public view override returns (uint256[] memory) {
+        return allUserStakes[user];
+    }
+
+    /**
+     * @notice Returns the index in userStakes of depositId.
+     * @dev    Used to circumvent limitations around returning complex types.
+     *
+     * @param user                  The user to query.
+     * @param depositId             The depositId for the user used to find the index of.
+     *
+     * @return                      The index of the given depositId.
+     */
+    function getDepositIdIdx(address user, uint256 depositId) public view override returns (uint256) {
+        return depositIdIdx[user][depositId];
+    }
+
+    /**
+     * @notice Returns the current deposit index of a user.
+     * @dev    Used to circumvent limitations around returning complex types.
+     *
+     * @param user                  The user to query.
+     *
+     * @return                      The current deposit index.
+     */
+    function getCurrentUserDepositIdx(address user) public view override returns (uint256) {
+        return currentUserDepositIdx[user];
+    }
+
+    /**
+     * @notice Returns information for a specific reward epoch.
+     * @dev    Used to circumvent limitations around returning complex types.
+     *
+     * @param idx                   The index of the reward epoch to lookup.
+     *
+     * @return                      The epoch information.
+     */
+    function getRewardEpoch(uint256 idx) public view override returns (RewardEpoch memory) {
+        return rewardEpochs[idx];
     }
 
     // ============================================ HELPERS ============================================
@@ -731,6 +763,9 @@ contract CellarStaking is Ownable {
                     totalRewardsEarned += _calculateStakeRewardsForEpoch(i, s);
                 }
 
+                // Overwrite, not increment, the accrued rewards. Previous loop
+                // always calculates the total epoch rewards
+                s.totalRewardsEarned = totalRewardsEarned;
                 s.lastAccountingTimestamp = block.timestamp;
             }
         }
@@ -827,10 +862,6 @@ contract CellarStaking is Ownable {
         // Give user new rewards based on share of total share seconds in epoch
         uint256 rewardsEarnedForEpoch = epoch.rewardsEarned *
             (s.shareSecondsAccumulated / epoch.shareSecondsAccumulated);
-
-        // Overwrite. not increment, the rewards for the epoch. Previous line
-        // always calculates the total epoch rewards
-        s.rewardsEarnedByEpoch[epochIdx] = rewardsEarnedForEpoch;
 
         return rewardsEarnedForEpoch;
     }
