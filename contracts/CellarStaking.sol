@@ -60,7 +60,7 @@ import "./interfaces/ICellarStaking.sol";
  * a given epoch of 100 seconds:
  *
  * a) User 1 deposits 50 shares before the epoch begins
- * b) User 2 deposits 40 shares at second 20 of the epoch
+ * b) User 2 deposits 20 shares at second 20 of the epoch
  * c) User 3 deposits 100 shares at second 50 of the epoch
  *
  * In this case,
