@@ -109,6 +109,7 @@ contract CellarStaking is Ownable {
     // ========================================== CONSTRUCTOR ===========================================
 
     constructor(
+        address _owner,
         ERC20 _stakingToken,
         ERC20 _distributionToken,
         uint256 _maxNumEpochs
@@ -116,6 +117,8 @@ contract CellarStaking is Ownable {
         stakingToken = _stakingToken;
         distributionToken = _distributionToken;
         maxNumEpochs = _maxNumEpochs;
+
+        transferOwnership(_owner);
     }
 
     // ======================================= STAKING OPERATIONS =======================================
@@ -380,6 +383,8 @@ contract CellarStaking is Ownable {
     }
 
     function emergencyStop(bool makeRewardsClaimable) external onlyOwner {
+        require(!ended, "STATE: already stopped");
+
         ended = true;
         claimable = makeRewardsClaimable;
 
@@ -401,8 +406,11 @@ contract CellarStaking is Ownable {
         // Return current epoch index
         uint256 timeElapsed = timestamp - startTimestamp;
 
-        epochIdx = 0;
         while (timeElapsed > 0) {
+            if (epochIdx > rewardEpochs.length - 1) {
+                revert("STATE: no epoch for given timestamp");
+            }
+
             // Advance one epoch
             RewardEpoch memory e = rewardEpochs[epochIdx];
 
@@ -575,7 +583,7 @@ contract CellarStaking is Ownable {
         require(totalShares == 0 || totalDeposits > 0, "ACCT: shares exist without deposits");
     }
 
-    function _getBoost(Lock _lock) public pure returns (uint256 boost, uint256 timelock) {
+    function _getBoost(Lock _lock) internal pure returns (uint256 boost, uint256 timelock) {
         if (_lock == Lock.day) {
             // 5%
             return (1e17, ONE_DAY);
