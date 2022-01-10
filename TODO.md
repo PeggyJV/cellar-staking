@@ -1,7 +1,7 @@
 ## TODOs
 
-[] Implement general staking/unstaking and share accounting
-[] Add ability to lock (1 day/7 day/14 day) with bonus multipliers
+[X] Implement general staking/unstaking and share accounting
+[X] Add ability to lock (1 day/7 day/14 day) with bonus multipliers
 [] Admin functions
 [] Create Error objects
 [] Pull interface out and add natspec documentation

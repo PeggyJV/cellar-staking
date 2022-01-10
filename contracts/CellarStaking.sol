@@ -32,6 +32,7 @@ contract CellarStaking is Ownable {
     event Stake(address indexed user, uint256 depositId, uint256 amount);
     event Unstake(address indexed user, uint256 depositId, uint256 amount);
     event Claim(address indexed user, uint256 depositId, uint256 amount);
+    event EmergencyStop(address owner, bool claimable);
 
     // ============================================ STATE ==============================================
 
@@ -76,6 +77,10 @@ contract CellarStaking is Ownable {
     RewardEpoch[] public rewardEpochs;
     uint256 public immutable maxNumEpochs;
 
+    bool public paused;
+    bool public ended;
+    bool public claimable;
+
     // ============= User State ==============
 
     struct UserStake {
@@ -117,6 +122,7 @@ contract CellarStaking is Ownable {
 
     function stake(uint256 amount, Lock lock)
         external
+        whenNotPaused
         checkSupplyAccounting
         updateTotalRewardAccounting
         updateUserRewardAccounting(msg.sender)
@@ -145,7 +151,7 @@ contract CellarStaking is Ownable {
         s.amountWithBoost = amountWithBoost;
         s.shares = newShares;
         s.shareSecondsAccumulated = 0;
-        s.rewardsEarned = 0;
+        s.totalRewardsEarned = 0;
         s.rewardsClaimed = 0;
         s.unlockTimestamp = block.timestamp + lockDuration;
         s.lastAccountingTimestamp = block.timestamp;
@@ -163,6 +169,7 @@ contract CellarStaking is Ownable {
 
     function unstake(uint256 depositId, uint256 amount)
         external
+        whenNotPaused
         checkSupplyAccounting
         updateTotalRewardAccounting
         updateUserRewardAccounting(msg.sender)
@@ -177,6 +184,7 @@ contract CellarStaking is Ownable {
 
     function unstakeAll()
         external
+        whenNotPaused
         checkSupplyAccounting
         updateTotalRewardAccounting
         updateUserRewardAccounting(msg.sender)
@@ -234,6 +242,7 @@ contract CellarStaking is Ownable {
 
     function claim(uint256 depositId)
         external
+        whenNotPaused
         checkSupplyAccounting
         updateTotalRewardAccounting
         updateUserRewardAccounting(msg.sender)
@@ -246,6 +255,7 @@ contract CellarStaking is Ownable {
 
     function claimAll()
         external
+        whenNotPaused
         checkSupplyAccounting
         updateTotalRewardAccounting
         updateUserRewardAccounting(msg.sender)
@@ -266,7 +276,7 @@ contract CellarStaking is Ownable {
         uint256 depositAmount = s.amount;
         require(depositAmount > 0, "USR: invalid depositId");
 
-        reward = s.rewardsEarned - s.rewardsClaimed;
+        reward = s.totalRewardsEarned - s.rewardsClaimed;
         s.rewardsClaimed += reward;
 
         // Distribute reward
@@ -275,13 +285,40 @@ contract CellarStaking is Ownable {
         emit Claim(msg.sender, depositId, reward);
     }
 
+    function emergencyUnstake() external {
+        require(ended, "STATE: staking program active");
+
+        uint256[] memory depositIds = allUserStakes[msg.sender];
+
+        for (uint256 i = 0; i < depositIds.length; i++) {
+            UserStake storage s = stakes[msg.sender][depositIds[i]];
+            stakingToken.transfer(msg.sender, s.amount);
+            s.amount = 0;
+        }
+    }
+
+    function emergencyClaim() external {
+        require(ended && claimable, "STATE: Tokens not claimable");
+
+        uint256[] memory depositIds = allUserStakes[msg.sender];
+
+        for (uint256 i = 0; i < depositIds.length; i++) {
+            UserStake storage s = stakes[msg.sender][depositIds[i]];
+            uint256 reward = s.totalRewardsEarned - s.rewardsClaimed;
+
+            distributionToken.safeTransfer(msg.sender, reward);
+
+            s.totalRewardsEarned = 0;
+        }
+    }
+
     // ======================================== ADMIN OPERATIONS ========================================
 
     function initializePool(
         uint256 _rewardsPerEpoch,
         uint256 _epochLength,
         uint256 _numEpochs
-    ) external onlyOwner {
+    ) external whenNotPaused onlyOwner {
         require(startTimestamp == 0, "STATE: already initialized");
         require(_numEpochs > 0, "USR: at least one epoch required");
         require(_numEpochs <= maxNumEpochs, "USR: too many epochs");
@@ -309,7 +346,7 @@ contract CellarStaking is Ownable {
         uint256 _rewardsPerEpoch,
         uint256 _epochLength,
         uint256 _numEpochs
-    ) external onlyOwner {
+    ) external whenNotPaused onlyOwner {
         require(startTimestamp > 0, "STATE: not initialized");
         require(_numEpochs > 0, "USR: at least one epoch required");
         require(rewardEpochs.length + _numEpochs <= maxNumEpochs, "USR: too many epochs");
@@ -336,6 +373,22 @@ contract CellarStaking is Ownable {
 
     function updateMinimumDeposit(uint256 _minimum) external onlyOwner {
         minimumDeposit = _minimum;
+    }
+
+    function setPaused(bool _paused) external onlyOwner {
+        paused = _paused;
+    }
+
+    function emergencyStop(bool makeRewardsClaimable) external onlyOwner {
+        ended = true;
+        claimable = makeRewardsClaimable;
+
+        if (!claimable) {
+            // Send distribution token back to owner
+            distributionToken.transfer(msg.sender, distributionToken.balanceOf(address(this)));
+        }
+
+        emit EmergencyStop(msg.sender, makeRewardsClaimable);
     }
 
     // ======================================= STATE INFORMATION =======================================
@@ -438,6 +491,12 @@ contract CellarStaking is Ownable {
 
         rewardsLeft = amount;
 
+        _;
+    }
+
+    modifier whenNotPaused() {
+        require(!paused, "STATE: Contract paused");
+        require(!ended, "STATE: Emergency killswitch activated. Contract will not restart");
         _;
     }
 
