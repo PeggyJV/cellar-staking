@@ -131,6 +131,7 @@ contract CellarStaking is Ownable {
 
     uint256 public minimumDeposit = 0;
     uint256 public startTimestamp;
+    uint256 public endTimestamp;
     uint256 public totalDeposits;
     uint256 public totalDepositsWithBoost;
     uint256 public totalShares;
@@ -306,6 +307,7 @@ contract CellarStaking is Ownable {
     {
         if (startTimestamp == 0) revert STATE_NotInitialized();
 
+        // Individually unstake each deposit
         uint256[] memory depositIds = allUserStakes[msg.sender];
 
         for (uint256 i = 0; i < depositIds.length; i++) {
@@ -340,6 +342,7 @@ contract CellarStaking is Ownable {
             amount = depositAmount;
         }
 
+        // Do share accounting and figure out how many to burn
         (uint256 boost, ) = _getBoost(s.lock);
         uint256 amountWithBoost = amount + (amount * boost) / ONE;
         uint256 sharesToBurn = (totalShares * amountWithBoost) / totalDepositsWithBoost;
@@ -408,6 +411,7 @@ contract CellarStaking is Ownable {
     {
         if (startTimestamp == 0) revert STATE_NotInitialized();
 
+        // Individually claim for each stake
         uint256[] memory depositIds = allUserStakes[msg.sender];
 
         for (uint256 i = 0; i < depositIds.length; i++) {
@@ -416,10 +420,10 @@ contract CellarStaking is Ownable {
     }
 
     /**
-     * @dev     Contains all logic for processing a claim operation.
-     *          Relies on previous reward accounting done before
-     *          processing external functions. Updates the amount
-     *          of rewards claimed so rewards cannot be claimed twice.
+     * @dev Contains all logic for processing a claim operation.
+     *      Relies on previous reward accounting done before
+     *      processing external functions. Updates the amount
+     *      of rewards claimed so rewards cannot be claimed twice.
      *
      *
      * @param depositId             The specified deposit to claim rewards for.
@@ -433,6 +437,7 @@ contract CellarStaking is Ownable {
         uint256 depositAmount = s.amount;
         if (depositAmount == 0) revert USR_NoDeposit(depositId);
 
+        // Increment rewards
         reward = s.totalRewardsEarned - s.rewardsClaimed;
         s.rewardsClaimed += reward;
 
@@ -512,6 +517,8 @@ contract CellarStaking is Ownable {
             currentTimestamp += _epochLength;
         }
 
+        endTimestamp = currentTimestamp;
+
         // Fund reward pool from owner
         uint256 rewardAmount = _rewardsPerEpoch * _numEpochs;
         distributionToken.safeTransferFrom(msg.sender, address(this), rewardAmount);
@@ -549,6 +556,8 @@ contract CellarStaking is Ownable {
             rewardEpochs.push(RewardEpoch(currentTimestamp, _epochLength, _rewardsPerEpoch, 0, 0));
             currentTimestamp += _epochLength;
         }
+
+        endTimestamp = currentTimestamp;
 
         // Fund reward pool from owner
         uint256 rewardAmount = _rewardsPerEpoch * _numEpochs;
@@ -590,6 +599,7 @@ contract CellarStaking is Ownable {
     function emergencyStop(bool makeRewardsClaimable) external onlyOwner {
         if (ended) revert STATE_AlreadyStopped();
 
+        // Update state and put in irreversible emergency mode
         ended = true;
         claimable = makeRewardsClaimable;
 
@@ -674,15 +684,19 @@ contract CellarStaking is Ownable {
      * @dev Assumes all epochs distribute rewards linearly.
      */
     modifier updateTotalRewardAccounting() {
-        uint256 epochNow = currentEpoch();
-        uint256 epochAtLastAccounting = epochAtTime(lastAccountingTimestamp);
+        // Only update if program hasn't ended or program has ended but accounting hasn't caught up
+        bool rewardsOngoing = block.timestamp < endTimestamp;
+        if (rewardsOngoing || lastAccountingTimestamp < endTimestamp) {
+            uint256 epochNow = rewardsOngoing ? currentEpoch() : epochAtTime(endTimestamp - 1);
+            uint256 epochAtLastAccounting = epochAtTime(lastAccountingTimestamp);
 
-        // For each epoch in window, calculate rewards
-        for (uint256 i = epochAtLastAccounting; i <= epochNow; i++) {
-            _calculateTotalRewardsForEpoch(rewardEpochs[i]);
+            // For each epoch in window, calculate rewards
+            for (uint256 i = epochAtLastAccounting; i <= epochNow; i++) {
+                _calculateTotalRewardsForEpoch(rewardEpochs[i]);
+            }
+
+            lastAccountingTimestamp = block.timestamp;
         }
-
-        lastAccountingTimestamp = block.timestamp;
 
         _;
     }
@@ -695,6 +709,8 @@ contract CellarStaking is Ownable {
      * @dev Assumes all epochs distribute rewards linearly.
      */
     modifier updateUserRewardAccounting(address user) {
+        bool rewardsOngoing = block.timestamp < endTimestamp;
+
         // Similar to total reward accounting, but must be done for each user stake
         uint256[] memory userStakes = allUserStakes[user];
 
@@ -703,9 +719,10 @@ contract CellarStaking is Ownable {
             UserStake storage s = stakes[user][userStakes[i]];
 
             // If shares are 0, stake is no longer relevant - it has been unstaked
-            if (s.shares > 0) {
+            // Only update if program hasn't ended or program has ended but accounting hasn't caught up
+            if (s.shares > 0 && (rewardsOngoing || s.lastAccountingTimestamp < endTimestamp)) {
                 // Calculate time passed since stake was last accounted for
-                uint256 epochNow = currentEpoch();
+                uint256 epochNow = rewardsOngoing ? currentEpoch() : epochAtTime(endTimestamp - 1);
                 uint256 epochAtLastAccounting = epochAtTime(s.lastAccountingTimestamp);
                 uint256 totalRewardsEarned = 0;
 

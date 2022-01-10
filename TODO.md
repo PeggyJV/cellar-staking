@@ -4,9 +4,9 @@
 [X] Add ability to lock (1 day/7 day/14 day) with bonus multipliers
 [X] Admin functions
 [X] Create Error objects
-[] Handle accounting after last epoch
+[X] Handle accounting after last epoch
 [] Pull interface out and add natspec documentation
-[] Write README
+[X] Write README
 [X] Write test scenarios
 [] Implement tests
 [] Add gas tests
