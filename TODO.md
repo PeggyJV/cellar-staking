@@ -3,7 +3,8 @@
 [X] Implement general staking/unstaking and share accounting
 [X] Add ability to lock (1 day/7 day/14 day) with bonus multipliers
 [X] Admin functions
-[] Create Error objects
+[X] Create Error objects
+[] Handle accounting after last epoch
 [] Pull interface out and add natspec documentation
 [] Write README
 [X] Write test scenarios

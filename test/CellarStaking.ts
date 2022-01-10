@@ -38,6 +38,7 @@ describe("CellarStaking", () => {
       it("should not allow a user to stake if the stake in under the minimum");
       it("should not allow a user to stake if there are no rewards left");
       it("should not allow a user to stake if their stake is too small to receive a share");
+      it("should revert for an invalid lock value");
       it("should allow a user to stake and calculate correct proportional share");
       it("should properly calculate a user's proportional share after locking boosts");
       it("should allocate correct proportional shares for multiple depositors");

@@ -8,27 +8,95 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "./Errors.sol";
 
 /**
- * Staking approach:
- * 1) The pool has a distribution token that is funded up-front
- * 2) Over time, rewards from that distribution token will be emitted
- *      - Either amount to be distributed _per time period (e.g. month)_ or an end date
- * 3) Users can deposit and their tokens are accounted for
- * 4) If users lock, their deposit "account" is boosted by a multiplier
- * 5) To calculate user rewards:
- * 6) Calculate the time user has been staking and since they have last claimed rewards
- * 7) Over time window, calculate total coins available for emissions (based on 2)
- * 8) Over time window, calculate user's total share of all deposits
- * 9) Multiply 7 by 8 to get amount of tokens user should be rewarded
+ * @title Sommelier Staking
+ * @author Kevin Kennis
  *
- * To do this, we need to track:
- * 1) User's base deposit and boosted deposit amount
- * 2) Emission schedule for the token (rewards per epoch, number of epochs)
- * 3) All deposits over given time frame
- * 4) Recalculate reward per share on every deposit/withdrawal
+ * Staking for Sommelier Cellars.
+ *
+ * This contract is inspired by the Synthetix staking rewards contract, Ampleforth's
+ * token geyser, and Treasure DAO's MAGIC mine. However, there are unique improvements
+ * and new features, specifically the epoch design. The reward epoch design allows
+ * for flexible definition of multi-step staking programs, such as designs where
+ * rewards 'halve' every certain number of epochs.
+ *
+ * *********************************** Funding Flow ***********************************
+ *
+ * 1) The contract owner calls 'initializePool' to specify an initial schedule of reward
+ *    epochs. The contract collects the distribution token from the owner to fund the
+ *    specified reward schedule.
+ * 2) At a future time, the contract owner may call 'replenishPool' to extend the staking
+ *    program with new reward epochs. These new epochs may distribute more or less
+ *    rewards than previous epochs.
+ *
+ * ********************************* Staking Lifecycle ********************************
+ *
+ * 1) A user may deposit a certain amount of tokens to stake, and is required to lock
+ *    those tokens for a specified amount of time. There are three locking options:
+ *    one day, one week, or one month. Longer locking times receive larger 'boosts',
+ *    that the deposit will receive a larger proportional amount of shares. A user
+ *    may not unstake until the amount of time defined by the lock has elapsed.
+ * 2) Once the lock has elapsed, a user may unstake their deposit, either partially
+ *    or in full. The user will continue to receive the same 'boosted' amount of rewards
+ *    until they unstake. The user may unstake all of their deposits at once, as long
+ *    as all of the lock times have elapsed. When unstaking, the user will also receive
+ *    all eligible rewards for all deposited stakes, which accumulate linearly.
+ * 3) At any time, a user may claim their available rewards for their deposits. Rewards
+ *    accumulate linearly and can be claimed at any time, whether or not the lock has
+ *    for a given deposit has expired. The user can claim rewards for a specific deposit,
+ *    or may choose to collect all eligible rewards at once.
+ *
+ * ************************************ Accounting ************************************
+ *
+ * The contract uses an accounting mechanism based on the 'share-seconds' model,
+ * originated by the Ampleforth token geyser. First, token deposits are accounted
+ * for as staking shares, which represent a proportional interest in total deposits,
+ * and acount for the 'boost' defined by locks.
+ *
+ * At each accounting checkpoint, every active share will accumulate 'share-seconds',
+ * which is the number of seconds a given share has been deposited into the staking
+ * program. Every reward epoch will accumulate share-seconds based on how many shares
+ * were deposited and when they were deposited. The following example applies to
+ * a given epoch of 100 seconds:
+ *
+ * a) User 1 deposits 50 shares before the epoch begins
+ * b) User 2 deposits 40 shares at second 20 of the epoch
+ * c) User 3 deposits 100 shares at second 50 of the epoch
+ *
+ * In this case,
+ *
+ * a) User 1 will accumulate 5000 share-seconds (50 shares * 100 seconds)
+ * b) User 2 will accumulate 3200 share-seconds (20 shares * 80 seconds)
+ * c) User 3 will accumulate 5000 share-seconds (100 shares * 50 seconds)
+ *
+ * So the total accumulated share-seconds will be 5000 + 3200 + 5000 = 13200.
+ * Then, each user will receive rewards proportional to the total from the
+ * predefined reward pool for the epoch. In this scenario, User 1 and User 3
+ * will receive approximately 37.88% of the total rewards, and User 2 will
+ * receive approximately 24.24% of the total rewards.
+ *
+ * Depending on deposit times, this accumulation may take place over multiple
+ * epochs, and the total rewards earned is simply the sum of rewards earned for
+ * each epoch. A user may also have multiple discrete deposits, which are all
+ * accounted for separately due to timelocks and locking boosts. Therefore,
+ * a user's total earned rewards are a function of their rewards across
+ * the proportional share-seconds accumulated for each staking epoch, across
+ * all epochs for which all user stakes were deposited.
+ *
+ * Reward accounting takes place before every operation which may change
+ * accounting calculations (minting of new shares on staking, burning of
+ * shares on unstaking, or claiming, which decrements eligible rewards).
+ * This is gas-intensive but unavoidable, since retroactive accounting
+ * based on previous proportionate shares would require a prohibitive
+ * amount of storage of historical state. On every accounting run, there
+ * are a number of safety checks to ensure that all reward tokens are
+ * accounted for and that no accounting time periods have been missed.
+ *
+ *
  */
-
 contract CellarStaking is Ownable {
     using SafeERC20 for ERC20;
+
+    // ============================================ EVENTS =============================================
 
     event Funding(address stakingToken, address distributionToken, uint256 rewardAmount);
     event Stake(address indexed user, uint256 depositId, uint256 amount);
@@ -51,6 +119,10 @@ contract CellarStaking is Ownable {
         week,
         twoWeeks
     }
+
+    uint256 public constant ONE_DAY_BOOST = 1e17; // 10% boost
+    uint256 public constant ONE_WEEK_BOOST = 4e17; // 40% boost
+    uint256 public constant TWO_WEEKS_BOOST = 1e18; // 100% boost
 
     // ============ Global State =============
 
@@ -77,8 +149,12 @@ contract CellarStaking is Ownable {
     }
 
     RewardEpoch[] public rewardEpochs;
+
+    /// @dev Limiting the maximum number of reward epochs protects against
+    ///      issues with the block gas limit.
     uint256 public immutable maxNumEpochs;
 
+    /// @notice Emergency states in case of contract malfunction.
     bool public paused;
     bool public ended;
     bool public claimable;
@@ -110,6 +186,12 @@ contract CellarStaking is Ownable {
 
     // ========================================== CONSTRUCTOR ===========================================
 
+    /**
+     * @param _owner                The owner of the staking contract - will immediately receive ownership.
+     * @param _stakingToken         The token users will deposit in order to stake.
+     * @param _distributionToken    The token the staking contract will distribute as rewards.
+     * @param _maxNumEpochs         The maximum number of reward epochs that can ever be scheduled.
+     */
     constructor(
         address _owner,
         ERC20 _stakingToken,
@@ -125,6 +207,14 @@ contract CellarStaking is Ownable {
 
     // ======================================= STAKING OPERATIONS =======================================
 
+    /**
+     * @notice  Make a new deposit into the staking contract. Longer locks receive reward boosts.
+     * @dev     Specified amount of stakingToken must be approved for withdrawal by the caller.
+     * @dev     Valid lock values are 0 (one day), 1 (one week), and 2 (two weeks).
+     *
+     * @param amount                The amount of the stakingToken to stake.
+     * @param lock                  The amount of time to lock stake for.
+     */
     function stake(uint256 amount, Lock lock)
         external
         whenNotPaused
@@ -133,9 +223,9 @@ contract CellarStaking is Ownable {
         updateUserRewardAccounting(msg.sender)
         updateRewardsLeft
     {
-        require(startTimestamp > 0, "STATE: not initialized");
-        require(amount > minimumDeposit, "USR: must stake more than minimum");
-        require(rewardsLeft > 0, "STATE: no rewards left");
+        if (startTimestamp == 0) revert STATE_NotInitialized();
+        if (amount < minimumDeposit) revert USR_MinimumDeposit(amount, minimumDeposit);
+        if (rewardsLeft == 0) revert STATE_NoRewardsLeft();
 
         // Record deposit
         uint256 depositId = currentUserDepositIdx[msg.sender]++;
@@ -150,7 +240,8 @@ contract CellarStaking is Ownable {
         uint256 newShares = totalShares > 0
             ? (totalShares * amountWithBoost) / totalDepositsWithBoost
             : amountWithBoost * initialSharesPerToken;
-        require(newShares > 0, "USR: stake too small");
+
+        if (newShares == 0) revert USR_StakeTooSmall(amount);
 
         s.amount = amount;
         s.amountWithBoost = amountWithBoost;
@@ -172,6 +263,16 @@ contract CellarStaking is Ownable {
         emit Stake(msg.sender, depositId, amount);
     }
 
+    /**
+     * @notice  Unstake a specified amount from a certain deposited stake.
+     * @dev     The lock time for the specified deposit must have elapsed.
+     * @dev     Unstaking automatically claims available rewards for the deopsit.
+     *
+     * @param depositId             The specified deposit to unstake from.
+     * @param amount                The amount of the stakingToken to withdraw and return to the caller.
+     *
+     * @return reward               The amount of accumulated rewards since the last reward claim.
+     */
     function unstake(uint256 depositId, uint256 amount)
         external
         whenNotPaused
@@ -181,12 +282,19 @@ contract CellarStaking is Ownable {
         updateRewardsLeft
         returns (uint256 reward)
     {
-        require(startTimestamp > 0, "STATE: not initialized");
-        require(amount > 0, "USR: must unstake more than 0");
+        if (startTimestamp == 0) revert STATE_NotInitialized();
+        if (amount == 0) revert USR_ZeroUnstake();
 
         return _unstake(depositId, amount);
     }
 
+    /**
+     * @notice  Unstake all user deposits.
+     * @dev     The lock times for the all user deposits must have elapsed.
+     * @dev     Unstaking automatically claims all available rewards.
+     *
+     * @return rewards              The amount of accumulated rewards since the last reward claim.
+     */
     function unstakeAll()
         external
         whenNotPaused
@@ -196,6 +304,8 @@ contract CellarStaking is Ownable {
         updateRewardsLeft
         returns (uint256[] memory rewards)
     {
+        if (startTimestamp == 0) revert STATE_NotInitialized();
+
         uint256[] memory depositIds = allUserStakes[msg.sender];
 
         for (uint256 i = 0; i < depositIds.length; i++) {
@@ -203,14 +313,25 @@ contract CellarStaking is Ownable {
         }
     }
 
+    /**
+     * @dev     Contains all logic for processing an unstake operation.
+     *          For the given deposit, does share accounting and burns
+     *          shares, returns staking tokens to the original owner,
+     *          updates global deposit and share trackers, and claims
+     *          rewards for the given deposit.
+     *
+     * @param depositId             The specified deposit to unstake from.
+     * @param amount                The amount of the stakingToken to withdraw and return to the caller.
+     *                              If an amount larger than the deposit amount is specified, return
+     *                              the entire deposit.
+     */
     function _unstake(uint256 depositId, uint256 amount) internal returns (uint256 reward) {
         // Fetch stake and make sure it is withdrawable
         UserStake storage s = stakes[msg.sender][depositId];
 
         uint256 depositAmount = s.amount;
-        require(depositAmount > 0, "USR: invalid depositId");
-
-        require(block.timestamp >= s.unlockTimestamp, "USR: stake still locked");
+        if (depositAmount == 0) revert USR_NoDeposit(depositId);
+        if (block.timestamp < s.unlockTimestamp) revert USR_StakeLocked(depositId);
 
         // Start unstaking
 
@@ -223,8 +344,8 @@ contract CellarStaking is Ownable {
         uint256 amountWithBoost = amount + (amount * boost) / ONE;
         uint256 sharesToBurn = (totalShares * amountWithBoost) / totalDepositsWithBoost;
 
-        require(sharesToBurn > 0, "USR: unstake amount too small");
-        require(sharesToBurn <= s.shares, "ACCT: attempted to burn too many shares for stake");
+        if (sharesToBurn == 0) revert USR_UnstakeTooSmall(amount);
+        if (sharesToBurn > s.shares) revert ACCT_TooManySharesBurned(sharesToBurn, s.shares);
 
         s.shares -= sharesToBurn;
 
@@ -245,6 +366,14 @@ contract CellarStaking is Ownable {
         emit Unstake(msg.sender, depositId, amount);
     }
 
+    /**
+     * @notice  Claim rewards for a given deposit.
+     * @dev     Rewards accumulate linearly since deposit.
+     *
+     * @param depositId             The specified deposit for which to claim rewards.
+     *
+     * @return reward               The amount of accumulated rewards since the last reward claim.
+     */
     function claim(uint256 depositId)
         external
         whenNotPaused
@@ -254,10 +383,20 @@ contract CellarStaking is Ownable {
         updateRewardsLeft
         returns (uint256 reward)
     {
-        require(startTimestamp > 0, "STATE: not initialized");
+        if (startTimestamp == 0) revert STATE_NotInitialized();
+
         return _claim(depositId);
     }
 
+    /**
+     * @notice  Claim all available rewards.
+     * @dev     Rewards accumulate linearly.
+     *
+     *
+     * @return rewards               The amount of accumulated rewards since the last reward claim.
+     *                               Each element of the array specified rewards for the corresponding
+     *                               indexed deposit.
+     */
     function claimAll()
         external
         whenNotPaused
@@ -267,6 +406,8 @@ contract CellarStaking is Ownable {
         updateRewardsLeft
         returns (uint256[] memory rewards)
     {
+        if (startTimestamp == 0) revert STATE_NotInitialized();
+
         uint256[] memory depositIds = allUserStakes[msg.sender];
 
         for (uint256 i = 0; i < depositIds.length; i++) {
@@ -274,12 +415,23 @@ contract CellarStaking is Ownable {
         }
     }
 
+    /**
+     * @dev     Contains all logic for processing a claim operation.
+     *          Relies on previous reward accounting done before
+     *          processing external functions. Updates the amount
+     *          of rewards claimed so rewards cannot be claimed twice.
+     *
+     *
+     * @param depositId             The specified deposit to claim rewards for.
+     *
+     * @return reward               The amount of accumulated rewards since the last reward claim.
+     */
     function _claim(uint256 depositId) internal returns (uint256 reward) {
         // Fetch stake and make sure it is valid
         UserStake storage s = stakes[msg.sender][depositId];
 
         uint256 depositAmount = s.amount;
-        require(depositAmount > 0, "USR: invalid depositId");
+        if (depositAmount == 0) revert USR_NoDeposit(depositId);
 
         reward = s.totalRewardsEarned - s.rewardsClaimed;
         s.rewardsClaimed += reward;
@@ -290,8 +442,12 @@ contract CellarStaking is Ownable {
         emit Claim(msg.sender, depositId, reward);
     }
 
+    /**
+     * @notice  Unstake and return all staked tokens to the caller.
+     * @dev     In emergency node, staking time locks do not apply.
+     */
     function emergencyUnstake() external {
-        require(ended, "STATE: staking program active");
+        if (!ended) revert STATE_NoEmergencyUnstake();
 
         uint256[] memory depositIds = allUserStakes[msg.sender];
 
@@ -302,8 +458,16 @@ contract CellarStaking is Ownable {
         }
     }
 
+    /**
+     * @notice  Claim any accumulated rewards in emergency mode.
+     * @dev     In emergency node, no additional reward accounting is done.
+     *          Rewards do not accumulate after emergency mode begins,
+     *          so any earned amount is only retroactive to when the contract
+     *          was active.
+     */
     function emergencyClaim() external {
-        require(ended && claimable, "STATE: Tokens not claimable");
+        if (!ended) revert STATE_NoEmergencyUnstake();
+        if (!claimable) revert STATE_NoEmergencyClaim();
 
         uint256[] memory depositIds = allUserStakes[msg.sender];
 
@@ -319,16 +483,24 @@ contract CellarStaking is Ownable {
 
     // ======================================== ADMIN OPERATIONS ========================================
 
+    /**
+     * @notice Specify an initial epoch schedule for staking rewards.
+     * @dev    Can only be called by owner. Owner must approve distributionToken for withdrawal.
+     *
+     * @param _rewardsPerEpoch      The total reward pool for each epoch.
+     * @param _epochLength          The length of each epoch in seconds.
+     * @param _numEpochs            The number of epochs to schedule.
+     */
     function initializePool(
         uint256 _rewardsPerEpoch,
         uint256 _epochLength,
         uint256 _numEpochs
     ) external whenNotPaused onlyOwner {
-        require(startTimestamp == 0, "STATE: already initialized");
-        require(_numEpochs > 0, "USR: at least one epoch required");
-        require(_numEpochs <= maxNumEpochs, "USR: too many epochs");
-        require(_epochLength > 0, "USR: epoch length must be non-zero");
-        require(_rewardsPerEpoch > 0, "USR: rewards per epoch must be non-zero");
+        if (startTimestamp > 0) revert STATE_AlreadyInitialized();
+        if (_numEpochs == 0) revert USR_NoEpochs();
+        if (_numEpochs > maxNumEpochs) revert USR_TooManyEpochs(_numEpochs, maxNumEpochs);
+        if (_epochLength == 0) revert USR_ZeroEpochLength();
+        if (_rewardsPerEpoch == 0) revert USR_ZeroRewardsPerEpoch();
 
         // Mark starting point for rewards accounting
         startTimestamp = block.timestamp;
@@ -347,19 +519,28 @@ contract CellarStaking is Ownable {
         emit Funding(address(stakingToken), address(distributionToken), rewardAmount);
     }
 
+    /**
+     * @notice Specify future epoch schedules for staking rewards.
+     * @dev    Can only be called by owner. Owner must approve distributionToken for withdrawal.
+     *
+     * @param _rewardsPerEpoch      The total reward pool for each epoch.
+     * @param _epochLength          The length of each epoch in seconds.
+     * @param _numEpochs            The number of epochs to schedule.
+     */
     function replenishPool(
         uint256 _rewardsPerEpoch,
         uint256 _epochLength,
         uint256 _numEpochs
     ) external whenNotPaused onlyOwner {
-        require(startTimestamp > 0, "STATE: not initialized");
-        require(_numEpochs > 0, "USR: at least one epoch required");
-        require(rewardEpochs.length + _numEpochs <= maxNumEpochs, "USR: too many epochs");
-        require(_epochLength > 0, "USR: epoch length must be non-zero");
-        require(_rewardsPerEpoch > 0, "USR: rewards per epoch must be non-zero");
+        if (startTimestamp == 0) revert STATE_NotInitialized();
+        if (_numEpochs == 0) revert USR_NoEpochs();
+        if (rewardEpochs.length + _numEpochs > maxNumEpochs)
+            revert USR_TooManyEpochs(rewardEpochs.length + _numEpochs, maxNumEpochs);
+        if (_epochLength == 0) revert USR_ZeroEpochLength();
+        if (_rewardsPerEpoch == 0) revert USR_ZeroRewardsPerEpoch();
 
         RewardEpoch memory lastEpoch = rewardEpochs[rewardEpochs.length - 1];
-        require(lastEpoch.startTimestamp > 0, "ACCT: could not find last epoch");
+        if (lastEpoch.startTimestamp > 0) revert ACCT_NoPreviousEpoch();
 
         uint256 currentTimestamp = lastEpoch.startTimestamp + lastEpoch.duration;
 
@@ -376,16 +557,38 @@ contract CellarStaking is Ownable {
         emit Funding(address(stakingToken), address(distributionToken), rewardAmount);
     }
 
+    /**
+     * @notice Specify a minimum deposit for staking.
+     * @dev    Can only be called by owner. Should be used if shares get large
+     *         enough that USR_StakeTooSmall commonly triggers.
+     *
+     * @param _minimum              The minimum deposit for each new stake.
+     */
     function updateMinimumDeposit(uint256 _minimum) external onlyOwner {
         minimumDeposit = _minimum;
     }
 
+    /**
+     * @notice Pause the contract. Pausing prevents staking, unstaking, claiming
+     *         rewards, and scheduling new reward epochs. Should only be used
+     *         in an emergency.
+     *
+     * @param _paused               Whether the contract should be paused.
+     */
     function setPaused(bool _paused) external onlyOwner {
         paused = _paused;
     }
 
+    /**
+     * @notice Stops the contract - this is irreversible. Should only be used
+     *         in an emergency, for example an irreversible accounting bug
+     *         or an exploit. Enables all depositors to withdraw their stake
+     *         instantly. Also stops new rewards accounting.
+     *
+     * @param makeRewardsClaimable  Whether any previously accumulated rewards should be claimable.
+     */
     function emergencyStop(bool makeRewardsClaimable) external onlyOwner {
-        require(!ended, "STATE: already stopped");
+        if (ended) revert STATE_AlreadyStopped();
 
         ended = true;
         claimable = makeRewardsClaimable;
@@ -400,17 +603,30 @@ contract CellarStaking is Ownable {
 
     // ======================================= STATE INFORMATION =======================================
 
+    /**
+     * @notice Returns the current epoch index. Reverts if there is no currently active epoch.
+     *
+     * @return The index of the currently active epoch.
+     */
     function currentEpoch() public view returns (uint256) {
         return epochAtTime(block.timestamp);
     }
 
+    /**
+     * @notice Returns the epoch index for a given timestamp. Reverts if there is no
+     *         active epoch for the specified time.
+     *
+     * @param timestamp             The timestamp for which to look up the epoch.
+     *
+     * @return epochIdx             The index of the currently active epoch.
+     */
     function epochAtTime(uint256 timestamp) public view returns (uint256 epochIdx) {
         // Return current epoch index
         uint256 timeElapsed = timestamp - startTimestamp;
 
         while (timeElapsed > 0) {
             if (epochIdx > rewardEpochs.length - 1) {
-                revert("STATE: no epoch for given timestamp");
+                revert USR_NoEpochAtTime(timestamp);
             }
 
             // Advance one epoch
@@ -426,6 +642,11 @@ contract CellarStaking is Ownable {
         }
     }
 
+    /**
+     * @notice Returns the total amount of rewards scheduled across all epochs (past and future).
+     *
+     * @return amount               The total amount of rewards for the staking schedule.
+     */
     function totalRewards() public view returns (uint256 amount) {
         amount = 0;
 
@@ -436,21 +657,23 @@ contract CellarStaking is Ownable {
 
     // ============================================ HELPERS ============================================
 
+    /**
+     * @dev Check for any accounting inconsistencies. Called before any account-mutating operation.
+     */
     modifier checkSupplyAccounting() {
         _checkSupplyAccounting();
 
         _;
     }
 
+    /**
+     * @dev Update reward accounting for the global state totals. Since every epoch has a
+     *      potentially different rewards schedule, must be done epoch by epoch. Called before any
+     *      account-mutating operation, such that share accounting is done correctly.
+     *
+     * @dev Assumes all epochs distribute rewards linearly.
+     */
     modifier updateTotalRewardAccounting() {
-        // In time since last checked we need to figure out for each epoch:
-        // Total seconds elapsed in epoch (either partial or full)
-        // Total share-seconds accumulated (i.e. one share deposited for one second)
-        // Share-seconds accumulated for user
-        // Total user percentage of all share-seconds accumulated
-        // Total reward (user percentage of total available rewards per epoch)
-        // Assumes all epochs distribute rewards linearly.
-
         uint256 epochNow = currentEpoch();
         uint256 epochAtLastAccounting = epochAtTime(lastAccountingTimestamp);
 
@@ -464,6 +687,13 @@ contract CellarStaking is Ownable {
         _;
     }
 
+    /**
+     * @dev Update reward accounting for a particular user. Must be done stake-by-stake, and
+     *      epoch-by-epoch within each stake, since stakes are deposited at different times
+     *      and accumulate their own share-seconds for each epoch.
+     *
+     * @dev Assumes all epochs distribute rewards linearly.
+     */
     modifier updateUserRewardAccounting(address user) {
         // Similar to total reward accounting, but must be done for each user stake
         uint256[] memory userStakes = allUserStakes[user];
@@ -491,6 +721,10 @@ contract CellarStaking is Ownable {
         _;
     }
 
+    /**
+     * @dev Update total amount of rewards left in schedule. Used to protect
+     *      against new staking if there are no more rewards to earn.
+     */
     modifier updateRewardsLeft() {
         uint256 amount = 0;
 
@@ -504,12 +738,20 @@ contract CellarStaking is Ownable {
         _;
     }
 
+    /**
+     * @dev Blocks calls if contract is paused or killed.
+     */
     modifier whenNotPaused() {
-        require(!paused, "STATE: Contract paused");
-        require(!ended, "STATE: Emergency killswitch activated. Contract will not restart");
+        if (paused) revert STATE_ContractPaused();
+        if (ended) revert STATE_ContractKilled();
         _;
     }
 
+    /**
+     * @dev Updates global state by calculating newly accumulated rewards
+     *      since last accounting timestamp, for a given epoch. Makes sure that
+     *      if an epoch is over, the entire reward pool has been accumulated.
+     */
     function _calculateTotalRewardsForEpoch(RewardEpoch storage epoch) internal {
         // If we have already done some accounting for this epoch, don't re-calculate
         uint256 accountingStartTime = lastAccountingTimestamp > epoch.startTimestamp
@@ -531,7 +773,8 @@ contract CellarStaking is Ownable {
         // If we are completing an epoch, check our accounting. Rewards earned
         // must equal total rewards
         if (block.timestamp > epochEndTimestamp) {
-            require(epoch.rewardsEarned == epoch.totalRewards, "ACCT: unaccumulated rewards in past epoch");
+            if (epoch.rewardsEarned != epoch.totalRewards)
+                revert ACCT_PastEpochRewards(epoch.rewardsEarned, epoch.totalRewards);
         }
 
         // Figure out total share-seconds accumulated
@@ -540,6 +783,10 @@ contract CellarStaking is Ownable {
         epoch.shareSecondsAccumulated += shareSecondsAcc;
     }
 
+    /**
+     * @dev Updates a stake's state by calculating newly accumulated rewards
+     *      since last accounting timestamp, for a given epoch and stake.
+     */
     function _calculateStakeRewardsForEpoch(uint256 epochIdx, UserStake storage s) internal returns (uint256) {
         RewardEpoch memory epoch = rewardEpochs[epochIdx];
 
@@ -571,6 +818,9 @@ contract CellarStaking is Ownable {
         return rewardsEarnedForEpoch;
     }
 
+    /**
+     * @dev Check for any accounting inconsistencies. Called before any account-mutating operation.
+     */
     function _checkSupplyAccounting() internal view {
         uint256 tokenBalance = distributionToken.balanceOf(address(this));
 
@@ -579,24 +829,22 @@ contract CellarStaking is Ownable {
             tokenBalance -= totalDeposits;
         }
 
-        require(tokenBalance >= rewardsLeft, "ACCT: cannot fund scheduled rewards");
-
-        // Check that both shared and staked line up
-        require(totalShares == 0 || totalDeposits > 0, "ACCT: shares exist without deposits");
+        if (tokenBalance < rewardsLeft) revert ACCT_CannotFundRewards(tokenBalance, rewardsLeft);
+        if (totalShares > 0 && totalDeposits == 0) revert ACCT_SharesWithoutDeposits(totalShares, totalDeposits);
     }
 
+    /**
+     * @dev Maps Lock enum values to corresponding lengths of time and reward boosts.
+     */
     function _getBoost(Lock _lock) internal pure returns (uint256 boost, uint256 timelock) {
         if (_lock == Lock.day) {
-            // 5%
-            return (1e17, ONE_DAY);
+            return (ONE_DAY_BOOST, ONE_DAY);
         } else if (_lock == Lock.week) {
-            // 40%
-            return (4e17, ONE_WEEK);
+            return (ONE_WEEK_BOOST, ONE_WEEK);
         } else if (_lock == Lock.twoWeeks) {
-            // 100%
-            return (1e18, TWO_WEEKS);
+            return (TWO_WEEKS_BOOST, TWO_WEEKS);
         } else {
-            revert("Invalid lock value");
+            revert USR_InvalidLockValue(uint256(_lock));
         }
     }
 }
