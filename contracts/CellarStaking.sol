@@ -83,7 +83,9 @@ contract CellarStaking is Ownable {
         uint256 amountWithBoost;
         uint256 shares;
         uint256 shareSecondsAccumulated;
-        uint256 rewardsEarned;
+        /// @notice epochIndex => rewards
+        mapping(uint256 => uint256) rewardsEarnedByEpoch;
+        uint256 totalRewardsEarned;
         uint256 rewardsClaimed;
         uint256 unlockTimestamp;
         uint256 lastAccountingTimestamp;
@@ -412,10 +414,11 @@ contract CellarStaking is Ownable {
                 // Calculate time passed since stake was last accounted for
                 uint256 epochNow = currentEpoch();
                 uint256 epochAtLastAccounting = epochAtTime(s.lastAccountingTimestamp);
+                uint256 totalRewardsEarned = 0;
 
                 // For each epoch in window, calculate rewards
                 for (uint256 j = epochAtLastAccounting; j <= epochNow; i++) {
-                    _calculateStakeRewardsForEpoch(rewardEpochs[i], s);
+                    totalRewardsEarned += _calculateStakeRewardsForEpoch(i, s);
                 }
 
                 s.lastAccountingTimestamp = block.timestamp;
@@ -440,17 +443,15 @@ contract CellarStaking is Ownable {
 
     function _calculateTotalRewardsForEpoch(RewardEpoch storage epoch) internal {
         // If we have already done some accounting for this epoch, don't re-calculate
-        uint256 epochStart = lastAccountingTimestamp > epoch.startTimestamp
+        uint256 accountingStartTime = lastAccountingTimestamp > epoch.startTimestamp
             ? lastAccountingTimestamp
             : epoch.startTimestamp;
 
-        // If we have not reached epochEnd, then only consider partial epoch
-        uint256 epochEnd = epochStart + epoch.duration;
-        if (block.timestamp < epochEnd) {
-            epochEnd = block.timestamp;
-        }
+        // If we have not reached end of epoch, then only consider partial epoch
+        uint256 epochEndTimestamp = epoch.startTimestamp + epoch.duration;
+        uint256 accountingEndTime = block.timestamp > epochEndTimestamp ? epochEndTimestamp : block.timestamp;
 
-        uint256 timeElapsed = epochEnd - epochStart;
+        uint256 timeElapsed = accountingEndTime - accountingStartTime;
 
         // Calculate rewards based on time elapsed in epoch
         uint256 epochRewardsPerSecond = epoch.totalRewards / epoch.duration;
@@ -458,13 +459,21 @@ contract CellarStaking is Ownable {
 
         epoch.rewardsEarned += rewardsForTime;
 
+        // If we are completing an epoch, check our accounting. Rewards earned
+        // must equal total rewards
+        if (block.timestamp > epochEndTimestamp) {
+            require(epoch.rewardsEarned == epoch.totalRewards, "ACCT: unaccumulated rewards in past epoch");
+        }
+
         // Figure out total share-seconds accumulated
         uint256 shareSecondsAcc = timeElapsed * totalShares;
         totalShareSeconds += shareSecondsAcc;
         epoch.shareSecondsAccumulated += shareSecondsAcc;
     }
 
-    function _calculateStakeRewardsForEpoch(RewardEpoch memory epoch, UserStake storage s) internal {
+    function _calculateStakeRewardsForEpoch(uint256 epochIdx, UserStake storage s) internal returns (uint256) {
+        RewardEpoch memory epoch = rewardEpochs[epochIdx];
+
         // If we have already done some accounting for this epoch, don't re-calculate
         uint256 epochStart = s.lastAccountingTimestamp > epoch.startTimestamp
             ? s.lastAccountingTimestamp
@@ -483,11 +492,14 @@ contract CellarStaking is Ownable {
         s.shareSecondsAccumulated += stakeShareSecondsAcc;
 
         // Give user new rewards based on share of total share seconds in epoch
-        // TODO: Fix this
-        // - rewardsEarned is not correct
-        // - counts share seconds that have already been accounted for
-        uint256 rewardsEarned = epoch.rewardsEarned * (s.shareSecondsAccumulated / epoch.shareSecondsAccumulated);
-        s.rewardsEarned += rewardsEarned;
+        uint256 rewardsEarnedForEpoch = epoch.rewardsEarned *
+            (s.shareSecondsAccumulated / epoch.shareSecondsAccumulated);
+
+        // Overwrite. not increment, the rewards for the epoch. Previous line
+        // always calculates the total epoch rewards
+        s.rewardsEarnedByEpoch[epochIdx] = rewardsEarnedForEpoch;
+
+        return rewardsEarnedForEpoch;
     }
 
     function _checkSupplyAccounting() internal view {
