@@ -31,7 +31,7 @@ contract CellarStaking is Ownable {
     event Funding(address stakingToken, address distributionToken, uint256 rewardAmount);
     event Stake(address indexed user, uint256 depositId, uint256 amount);
     event Unstake(address indexed user, uint256 depositId, uint256 amount);
-    event Claim(address indexed user, uint256 amount);
+    event Claim(address indexed user, uint256 depositId, uint256 amount);
 
     // ============================================ STATE ==============================================
 
@@ -41,6 +41,7 @@ contract CellarStaking is Ownable {
     uint256 public constant ONE_DAY = 60 * 60 * 24;
     uint256 public constant ONE_WEEK = ONE_DAY * 7;
     uint256 public constant TWO_WEEKS = ONE_WEEK * 2;
+    uint256 public constant MAX_UINT = 2**256 - 1;
 
     enum Lock {
         day,
@@ -69,7 +70,6 @@ contract CellarStaking is Ownable {
         uint256 duration;
         uint256 totalRewards;
         uint256 rewardsEarned;
-        uint256 rewardsClaimed;
         uint256 shareSecondsAccumulated;
     }
 
@@ -170,6 +170,25 @@ contract CellarStaking is Ownable {
         require(startTimestamp > 0, "STATE: not initialized");
         require(amount > 0, "USR: must unstake more than 0");
 
+        return _unstake(depositId, amount);
+    }
+
+    function unstakeAll()
+        external
+        checkSupplyAccounting
+        updateTotalRewardAccounting
+        updateUserRewardAccounting(msg.sender)
+        updateRewardsLeft
+        returns (uint256[] memory rewards)
+    {
+        uint256[] memory depositIds = allUserStakes[msg.sender];
+
+        for (uint256 i = 0; i < depositIds.length; i++) {
+            rewards[i] = _unstake(depositIds[i], MAX_UINT);
+        }
+    }
+
+    function _unstake(uint256 depositId, uint256 amount) internal returns (uint256 reward) {
         // Fetch stake and make sure it is withdrawable
         UserStake storage s = stakes[msg.sender][depositId];
 
@@ -194,22 +213,64 @@ contract CellarStaking is Ownable {
 
         s.shares -= sharesToBurn;
 
-        // Calculate reward
-
         // Update global state
         totalDeposits -= amount;
         totalDepositsWithBoost -= amountWithBoost;
         totalShares -= sharesToBurn;
 
-        // Distribute rewards
+        // Distribute stake
         stakingToken.safeTransfer(msg.sender, amount);
-        distributionToken.safeTransfer(msg.sender, reward);
+
+        // Distribute rewards via claim
+        reward = _claim(depositId);
 
         // Do final accounting check
         _checkSupplyAccounting();
 
         emit Unstake(msg.sender, depositId, amount);
-        emit Claim(msg.sender, reward);
+    }
+
+    function claim(uint256 depositId)
+        external
+        checkSupplyAccounting
+        updateTotalRewardAccounting
+        updateUserRewardAccounting(msg.sender)
+        updateRewardsLeft
+        returns (uint256 reward)
+    {
+        require(startTimestamp > 0, "STATE: not initialized");
+        return _claim(depositId);
+    }
+
+    function claimAll()
+        external
+        checkSupplyAccounting
+        updateTotalRewardAccounting
+        updateUserRewardAccounting(msg.sender)
+        updateRewardsLeft
+        returns (uint256[] memory rewards)
+    {
+        uint256[] memory depositIds = allUserStakes[msg.sender];
+
+        for (uint256 i = 0; i < depositIds.length; i++) {
+            rewards[i] = _claim(depositIds[i]);
+        }
+    }
+
+    function _claim(uint256 depositId) internal returns (uint256 reward) {
+        // Fetch stake and make sure it is valid
+        UserStake storage s = stakes[msg.sender][depositId];
+
+        uint256 depositAmount = s.amount;
+        require(depositAmount > 0, "USR: invalid depositId");
+
+        reward = s.rewardsEarned - s.rewardsClaimed;
+        s.rewardsClaimed += reward;
+
+        // Distribute reward
+        distributionToken.safeTransfer(msg.sender, reward);
+
+        emit Claim(msg.sender, depositId, reward);
     }
 
     // ======================================== ADMIN OPERATIONS ========================================
@@ -231,7 +292,7 @@ contract CellarStaking is Ownable {
 
         // Create new epochs
         for (uint256 i = 0; i < _numEpochs; i++) {
-            rewardEpochs.push(RewardEpoch(currentTimestamp, _epochLength, _rewardsPerEpoch, 0, 0, 0));
+            rewardEpochs.push(RewardEpoch(currentTimestamp, _epochLength, _rewardsPerEpoch, 0, 0));
             currentTimestamp += _epochLength;
         }
 
@@ -260,7 +321,7 @@ contract CellarStaking is Ownable {
 
         // Create new epochs
         for (uint256 i = 0; i < _numEpochs; i++) {
-            rewardEpochs.push(RewardEpoch(currentTimestamp, _epochLength, _rewardsPerEpoch, 0, 0, 0));
+            rewardEpochs.push(RewardEpoch(currentTimestamp, _epochLength, _rewardsPerEpoch, 0, 0));
             currentTimestamp += _epochLength;
         }
 
@@ -417,17 +478,14 @@ contract CellarStaking is Ownable {
 
         uint256 timeElapsed = epochEnd - epochStart;
 
-        // Calculate rewards based on time elapsed in epoch
-        uint256 epochRewardsPerSecond = epoch.totalRewards / epoch.duration;
-        uint256 rewardsForTime = epochRewardsPerSecond * timeElapsed;
-
-        epoch.rewardsEarned += rewardsForTime;
-
         // Figure out total share-seconds accumulated
         uint256 stakeShareSecondsAcc = timeElapsed * s.shares;
         s.shareSecondsAccumulated += stakeShareSecondsAcc;
 
         // Give user new rewards based on share of total share seconds in epoch
+        // TODO: Fix this
+        // - rewardsEarned is not correct
+        // - counts share seconds that have already been accounted for
         uint256 rewardsEarned = epoch.rewardsEarned * (s.shareSecondsAccumulated / epoch.shareSecondsAccumulated);
         s.rewardsEarned += rewardsEarned;
     }
