@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.8.4;
 
-// ========================================== USER ERRORS ===========================================
+// ==================================================================================================
+// ===========================                USER ERRORS                ============================
+// ==================================================================================================
 /// These errors represent invalid user input to functions.
 ///
 /// Where appropriate, the invalid value is specified along with constraints.
@@ -90,7 +92,9 @@ error USR_NoEpochAtTime(uint256 timestamp);
  */
 error USR_InvalidLockValue(uint256 lock);
 
-// ========================================== STATE ERRORS ==========================================
+// ==================================================================================================
+// ===========================                STATE ERRORS               ============================
+// ==================================================================================================
 /// These errors represent actions that are being prevented due to current contract state.
 ///
 /// These errors do not relate to user input, and may or may not be resolved by other actions
@@ -142,7 +146,9 @@ error STATE_ContractPaused();
  */
 error STATE_ContractKilled();
 
-// ======================================== ACCOUNTING ERRORS =======================================
+// ==================================================================================================
+// ===========================             ACCOUNTING ERRORS             ============================
+// ==================================================================================================
 /// These are errors that surface inconsistent accounting and are potentially serious.
 ///
 /// They should not occur in normal contract operation and indicate the presence of an
