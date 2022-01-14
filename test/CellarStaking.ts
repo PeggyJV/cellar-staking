@@ -4,10 +4,9 @@ import { expect } from "chai";
 
 const { loadFixture } = waffle;
 
-import type { Greeter } from "../src/types/Greeter";
 import type { CellarStaking } from "../src/types/CellarStaking";
-import type { ERC20 } from "../src/types/ERC20";
 import { deploy } from "./utils";
+import type { MockERC20 } from "../src/types/MockERC20";
 
 interface TestContext {
   signers: SignerWithAddress[];
@@ -15,6 +14,8 @@ interface TestContext {
   user: SignerWithAddress;
   tokenStake: ERC20;
   tokenDist: ERC20;
+  tokenStake: MockERC20;
+  tokenDist: MockERC20;
   maxEpochs: number;
   staking: CellarStaking;
 }
@@ -29,8 +30,11 @@ describe("CellarStaking", () => {
     const user = signers[1];
 
     // Bootstrap staking and distribution tokens
-    const tokenStake = <ERC20>await deploy("ERC20", admin, ["staking", "stk"]);
-    const tokenDist = <ERC20>await deploy("ERC20", admin, ["distribution", "dist"]);
+    const tokenStake = <MockERC20>await deploy("MockERC20", admin, ["staking", "stk"]);
+    await tokenStake.mint(user.address, initialTokenAmount);
+
+    const tokenDist = <MockERC20>await deploy("MockERC20", admin, ["distribution", "dist"]);
+    await tokenDist.mint(admin.address, initialTokenAmount);
 
     // Bootstrap CellarStaking contract
     const maxEpochs = 3;
