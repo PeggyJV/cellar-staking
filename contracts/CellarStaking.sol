@@ -167,6 +167,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         stakingToken = _stakingToken;
         distributionToken = _distributionToken;
         maxNumEpochs = _maxNumEpochs;
+        paused = true;
 
         transferOwnership(_owner);
     }
@@ -190,7 +191,6 @@ contract CellarStaking is ICellarStaking, Ownable {
         updateUserRewardAccounting(msg.sender)
         updateRewardsLeft
     {
-        if (startTimestamp == 0) revert STATE_NotInitialized();
         if (amount < minimumDeposit) revert USR_MinimumDeposit(amount, minimumDeposit);
         if (rewardsLeft == 0) revert STATE_NoRewardsLeft();
 
@@ -250,7 +250,6 @@ contract CellarStaking is ICellarStaking, Ownable {
         updateRewardsLeft
         returns (uint256 reward)
     {
-        if (startTimestamp == 0) revert STATE_NotInitialized();
         if (amount == 0) revert USR_ZeroUnstake();
 
         return _unstake(depositId, amount);
@@ -273,8 +272,6 @@ contract CellarStaking is ICellarStaking, Ownable {
         updateRewardsLeft
         returns (uint256[] memory rewards)
     {
-        if (startTimestamp == 0) revert STATE_NotInitialized();
-
         // Individually unstake each deposit
         uint256[] memory depositIds = allUserStakes[msg.sender];
 
@@ -355,8 +352,6 @@ contract CellarStaking is ICellarStaking, Ownable {
         updateRewardsLeft
         returns (uint256 reward)
     {
-        if (startTimestamp == 0) revert STATE_NotInitialized();
-
         return _claim(depositId);
     }
 
@@ -379,8 +374,6 @@ contract CellarStaking is ICellarStaking, Ownable {
         updateRewardsLeft
         returns (uint256[] memory rewards)
     {
-        if (startTimestamp == 0) revert STATE_NotInitialized();
-
         // Individually claim for each stake
         uint256[] memory depositIds = allUserStakes[msg.sender];
 
@@ -470,7 +463,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         uint256 _rewardsPerEpoch,
         uint256 _epochLength,
         uint256 _numEpochs
-    ) external override whenNotPaused onlyOwner {
+    ) external override onlyOwner {
         if (startTimestamp > 0) revert STATE_AlreadyInitialized();
         if (_numEpochs == 0) revert USR_NoEpochs();
         if (_numEpochs > maxNumEpochs) revert USR_TooManyEpochs(_numEpochs, maxNumEpochs);
@@ -478,7 +471,9 @@ contract CellarStaking is ICellarStaking, Ownable {
         if (_rewardsPerEpoch == 0) revert USR_ZeroRewardsPerEpoch();
 
         // Mark starting point for rewards accounting
+        paused = false;
         startTimestamp = block.timestamp;
+        lastAccountingTimestamp = startTimestamp;
         uint256 currentTimestamp = startTimestamp;
 
         // Create new epochs
@@ -509,7 +504,6 @@ contract CellarStaking is ICellarStaking, Ownable {
         uint256 _epochLength,
         uint256 _numEpochs
     ) external override whenNotPaused onlyOwner {
-        if (startTimestamp == 0) revert STATE_NotInitialized();
         if (_numEpochs == 0) revert USR_NoEpochs();
         if (rewardEpochs.length + _numEpochs > maxNumEpochs)
             revert USR_TooManyEpochs(rewardEpochs.length + _numEpochs, maxNumEpochs);

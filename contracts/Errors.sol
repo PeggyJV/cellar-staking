@@ -101,11 +101,6 @@ error USR_InvalidLockValue(uint256 lock);
 ///     or the progression of time.
 
 /**
- * @notice The caller attempted to perform an action which required the pool to be initialized.
- */
-error STATE_NotInitialized();
-
-/**
  * @notice The caller attempted to initialize the pool more than once.
  */
 error STATE_AlreadyInitialized();
