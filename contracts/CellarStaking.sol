@@ -313,7 +313,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         uint256 sharesToBurn = (totalShares * amountWithBoost) / totalDepositsWithBoost;
 
         if (sharesToBurn == 0) revert USR_UnstakeTooSmall(amount);
-        if (sharesToBurn > s.shares) revert ACCT_TooManySharesBurned(sharesToBurn, s.shares);
+        if (sharesToBurn > s.shares) revert ACCT_TooManySharesBurned(msg.sender, depositId, sharesToBurn, s.shares);
 
         s.shares -= sharesToBurn;
 
@@ -549,6 +549,10 @@ contract CellarStaking is ICellarStaking, Ownable {
      * @param _paused               Whether the contract should be paused.
      */
     function setPaused(bool _paused) external override onlyOwner {
+        if (_paused == true && startTimestamp == 0) {
+            revert STATE_NotInitialized();
+        }
+
         paused = _paused;
     }
 
