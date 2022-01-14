@@ -93,7 +93,7 @@ describe("CellarStaking", () => {
         const { staking, stakingUser, user } = ctx;
         await staking.initializePool(100, oneDaySec, 1);
         await stakingUser.stake(1, 0);
-        await increaseTime(oneDaySec - 1);
+        await increaseTime(oneDaySec - 1); // epoch has not completed
 
         const claimed = await stakingUser.claimAll();
         console.log(claimed);
@@ -105,7 +105,7 @@ describe("CellarStaking", () => {
         const { staking, stakingUser, user } = ctx;
         await staking.initializePool(100, oneDaySec, 1);
         await stakingUser.stake(1, 0);
-        await increaseTime(oneDaySec);
+        await increaseTime(oneDaySec); // epoch has completed
 
         const claimed = await stakingUser.claimAll();
         console.log(claimed);
