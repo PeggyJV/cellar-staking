@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 
 import "./Errors.sol";
 import "./interfaces/ICellarStaking.sol";
+import "hardhat/console.sol";
 
 /**
  * @title Sommelier Staking
@@ -479,6 +480,7 @@ contract CellarStaking is ICellarStaking, Ownable {
 
         // Mark starting point for rewards accounting
         startTimestamp = block.timestamp;
+        lastAccountingTimestamp = startTimestamp;
         uint256 currentTimestamp = startTimestamp;
 
         // Create new epochs
@@ -720,6 +722,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         bool rewardsOngoing = block.timestamp < endTimestamp;
         if (rewardsOngoing || lastAccountingTimestamp < endTimestamp) {
             uint256 epochNow = rewardsOngoing ? currentEpoch() : epochAtTime(endTimestamp - 1);
+
             uint256 epochAtLastAccounting = epochAtTime(lastAccountingTimestamp);
 
             // For each epoch in window, calculate rewards
