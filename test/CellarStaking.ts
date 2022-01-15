@@ -5,7 +5,7 @@ import { expect } from "chai";
 const { loadFixture } = waffle;
 
 import type { CellarStaking } from "../src/types/CellarStaking";
-import { deploy } from "./utils";
+import { deploy, setNextBlockTimestamp } from "./utils";
 import type { MockERC20 } from "../src/types/MockERC20";
 
 interface TestContext {
@@ -16,6 +16,7 @@ interface TestContext {
   tokenDist: MockERC20;
   maxEpochs: number;
   staking: CellarStaking;
+  stakingUser: CellarStaking;
 }
 
 describe("CellarStaking", () => {
@@ -39,6 +40,17 @@ describe("CellarStaking", () => {
     const maxEpochs = 3;
     const params = [admin.address, tokenStake.address, tokenDist.address, maxEpochs];
     const staking = <CellarStaking>await deploy("CellarStaking", admin, params);
+    const stakingUser = await staking.connect(user);
+
+    // Allow staking contract to transfer rewardsfor distribution
+    await tokenDist.increaseAllowance(staking.address, initialTokenAmount);
+
+    // Allow staking contract to transfer on behalf of user
+    const tokenStakeUser = await tokenStake.connect(user);
+    await tokenStakeUser.increaseAllowance(staking.address, initialTokenAmount);
+
+    // test chain starts at block.timestamp 0, must increase it to pass startTimestamp checks
+    await setNextBlockTimestamp(Date.now());
 
     return {
       signers,
@@ -48,6 +60,7 @@ describe("CellarStaking", () => {
       tokenDist,
       maxEpochs,
       staking,
+      stakingUser,
     };
   };
 
