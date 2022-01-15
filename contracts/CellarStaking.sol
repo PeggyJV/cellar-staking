@@ -549,7 +549,7 @@ contract CellarStaking is ICellarStaking, Ownable {
      * @param _paused               Whether the contract should be paused.
      */
     function setPaused(bool _paused) external override onlyOwner {
-        if (_paused == true && startTimestamp == 0) {
+        if (_paused == false && startTimestamp == 0) {
             revert STATE_NotInitialized();
         }
 
