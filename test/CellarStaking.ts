@@ -5,7 +5,6 @@ import { expect } from "chai";
 const { loadFixture } = waffle;
 
 import type { CellarStaking } from "../src/types/CellarStaking";
-import { deploy, setNextBlockTimestamp } from "./utils";
 import type { MockERC20 } from "../src/types/MockERC20";
 import { deploy, increaseTime, setNextBlockTimestamp } from "./utils";
 
@@ -76,14 +75,13 @@ describe("CellarStaking", () => {
       it("should not allow staking if the rewards are not initialized", async () => {
         const { stakingUser } = ctx;
 
-        const stakingAsUser = await staking.connect(user);
-        await expect(stakingAsUser.stake(1000, 0)).to.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.stake(1000, 0)).to.be.revertedWith("STATE_ContractPaused");
       });
 
       it("should not allow a user to stake if the stake is under the minimum", async () => {
         const { staking, stakingUser } = ctx;
         const min = 100;
-        await staking.initializePool(100, oneDaySec, 1);
+        await staking.initializePool(oneDaySec, oneDaySec, 1);
         await staking.updateMinimumDeposit(min);
 
         await expect(stakingUser.stake(min - 1, 0)).to.be.revertedWith("USR_MinimumDeposit");
@@ -91,10 +89,10 @@ describe("CellarStaking", () => {
 
       it("should not allow a user to stake if there are no rewards left", async () => {
         const { staking, stakingUser } = ctx;
-        await staking.initializePool(100, oneDaySec, 1);
+        await staking.initializePool(oneDaySec, oneDaySec, 1);
         await increaseTime(oneDaySec + 15); // epoch has not completed
 
-        await expect(stakingUser.stake(1, 0)).to.be.revertedWith("ACCT_PastEpochRewards");
+        await expect(stakingUser.stake(1, 0)).to.be.revertedWith("STATE_NoRewardsLeft");
       });
 
       it("should not allow a user to stake if their stake is too small to receive a share");
