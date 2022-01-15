@@ -89,28 +89,12 @@ describe("CellarStaking", () => {
         await expect(stakingUser.stake(min - 1, 0)).to.be.revertedWith("USR_MinimumDeposit");
       });
 
-      it.only("should not allow a user to stake if there are no rewards left", async () => {
+      it("should not allow a user to stake if there are no rewards left", async () => {
         const { staking, stakingUser, user } = ctx;
         await staking.initializePool(100, oneDaySec, 1);
-        await stakingUser.stake(1, 0);
-        await increaseTime(oneDaySec - 1); // epoch has not completed
+        await increaseTime(oneDaySec + 15); // epoch has not completed
 
-        const claimed = await stakingUser.claimAll();
-        console.log(claimed);
-
-        //await expect(stakingUser.stake(100, 0)).to.be.revertedWith("USR_MinimumDeposit");
-      });
-
-      it.only("should not allow a user to stake if there are not enough rewards left", async () => {
-        const { staking, stakingUser, user } = ctx;
-        await staking.initializePool(100, oneDaySec, 1);
-        await stakingUser.stake(1, 0);
-        await increaseTime(oneDaySec); // epoch has completed
-
-        const claimed = await stakingUser.claimAll();
-        console.log(claimed);
-
-        //await expect(stakingUser.stake(100, 0)).to.be.revertedWith("USR_MinimumDeposit");
+        await expect(stakingUser.stake(1, 0)).to.be.revertedWith("ACCT_PastEpochRewards");
       });
     });
   });
