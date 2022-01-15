@@ -4,28 +4,64 @@ import { expect } from "chai";
 
 const { loadFixture } = waffle;
 
-import type { Greeter } from "../src/types/Greeter";
-import { deploy } from "./utils";
+import type { CellarStaking } from "../src/types/CellarStaking";
+import { deploy, setNextBlockTimestamp } from "./utils";
+import type { MockERC20 } from "../src/types/MockERC20";
 
 interface TestContext {
-  // signers: SignerWithAddress[];
-  // admin: SignerWithAddress;
-  // greeter: Greeter;
+  signers: SignerWithAddress[];
+  admin: SignerWithAddress;
+  user: SignerWithAddress;
+  tokenStake: MockERC20;
+  tokenDist: MockERC20;
+  maxEpochs: number;
+  staking: CellarStaking;
+  stakingUser: CellarStaking;
 }
 
 describe("CellarStaking", () => {
   let ctx: TestContext;
+  const initialTokenAmount = 1000000; // 1,000,000
 
   const fixture = async (): Promise<TestContext> => {
-    // const signers: SignerWithAddress[] = await ethers.getSigners();
-    // const greeter = <Greeter>await deploy("Greeter", signers[0], ["Hello, world!"]);
+    // Signers
+    const signers: SignerWithAddress[] = await ethers.getSigners();
+    const admin = signers[0];
+    const user = signers[1];
 
-    // return {
-    //   signers,
-    //   admin: signers[0],
-    //   greeter,
-    // };
-    return {};
+    // Bootstrap staking and distribution tokens
+    const tokenStake = <MockERC20>await deploy("MockERC20", admin, ["staking", "stk"]);
+    await tokenStake.mint(user.address, initialTokenAmount);
+
+    const tokenDist = <MockERC20>await deploy("MockERC20", admin, ["distribution", "dist"]);
+    await tokenDist.mint(admin.address, initialTokenAmount);
+
+    // Bootstrap CellarStaking contract
+    const maxEpochs = 3;
+    const params = [admin.address, tokenStake.address, tokenDist.address, maxEpochs];
+    const staking = <CellarStaking>await deploy("CellarStaking", admin, params);
+    const stakingUser = await staking.connect(user);
+
+    // Allow staking contract to transfer rewardsfor distribution
+    await tokenDist.increaseAllowance(staking.address, initialTokenAmount);
+
+    // Allow staking contract to transfer on behalf of user
+    const tokenStakeUser = await tokenStake.connect(user);
+    await tokenStakeUser.increaseAllowance(staking.address, initialTokenAmount);
+
+    // test chain starts at block.timestamp 0, must increase it to pass startTimestamp checks
+    await setNextBlockTimestamp(Date.now());
+
+    return {
+      signers,
+      admin,
+      user,
+      tokenStake,
+      tokenDist,
+      maxEpochs,
+      staking,
+      stakingUser,
+    };
   };
 
   beforeEach(async () => {
@@ -34,7 +70,12 @@ describe("CellarStaking", () => {
 
   describe("User Operations", () => {
     describe("stake", () => {
-      it("should not allow staking if the rewards are not initialized");
+      it("should not allow staking if the rewards are not initialized", async () => {
+        const { staking, user } = ctx;
+
+        const stakingAsUser = await staking.connect(user);
+        await expect(stakingAsUser.stake(1000, 0)).to.be.revertedWith("STATE_ContractPaused");
+      });
       it("should not allow a user to stake if the stake in under the minimum");
       it("should not allow a user to stake if there are no rewards left");
       it("should not allow a user to stake if their stake is too small to receive a share");
