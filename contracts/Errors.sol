@@ -73,6 +73,8 @@ error USR_ZeroEpochLength();
 
 /**
  * @notice The contract owner attempted to update rewards but 0 rewards per epoch.
+ *         This can also happen if there is less than 1 wei of rewards per second of the
+ *         epoch - due to integer division this will also lead to 0 rewards.
  */
 error USR_ZeroRewardsPerEpoch();
 

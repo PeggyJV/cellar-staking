@@ -376,6 +376,7 @@ contract CellarStaking is ICellarStaking, Ownable {
     {
         // Individually claim for each stake
         uint256[] memory depositIds = allUserStakes[msg.sender];
+        rewards = new uint256[](depositIds.length);
 
         for (uint256 i = 0; i < depositIds.length; i++) {
             rewards[i] = _claim(depositIds[i]);
@@ -468,7 +469,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         if (_numEpochs == 0) revert USR_NoEpochs();
         if (_numEpochs > maxNumEpochs) revert USR_TooManyEpochs(_numEpochs, maxNumEpochs);
         if (_epochLength == 0) revert USR_ZeroEpochLength();
-        if (_rewardsPerEpoch == 0) revert USR_ZeroRewardsPerEpoch();
+        if (_rewardsPerEpoch < _epochLength) revert USR_ZeroRewardsPerEpoch();
 
         // Mark starting point for rewards accounting
         paused = false;
@@ -508,7 +509,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         if (rewardEpochs.length + _numEpochs > maxNumEpochs)
             revert USR_TooManyEpochs(rewardEpochs.length + _numEpochs, maxNumEpochs);
         if (_epochLength == 0) revert USR_ZeroEpochLength();
-        if (_rewardsPerEpoch == 0) revert USR_ZeroRewardsPerEpoch();
+        if (_rewardsPerEpoch < _epochLength) revert USR_ZeroRewardsPerEpoch();
 
         RewardEpoch memory lastEpoch = rewardEpochs[rewardEpochs.length - 1];
         if (lastEpoch.startTimestamp > 0) revert ACCT_NoPreviousEpoch();
@@ -757,7 +758,7 @@ contract CellarStaking is ICellarStaking, Ownable {
                 uint256 totalRewardsEarned = 0;
 
                 // For each epoch in window, calculate rewards
-                for (uint256 j = epochAtLastAccounting; j <= epochNow; i++) {
+                for (uint256 j = epochAtLastAccounting; j <= epochNow; j++) {
                     totalRewardsEarned += _calculateStakeRewardsForEpoch(i, s);
                 }
 
