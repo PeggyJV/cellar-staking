@@ -13,8 +13,8 @@ pragma solidity >=0.8.4;
 /**
  * @notice User attempted to stake an amount smaller than the minimu deposit.
  *
- * @param amount Amount user attmpted to stake.
- * @param minimumDeposit The minimum deopsit amount accepted.
+ * @param amount                Amount user attmpted to stake.
+ * @param minimumDeposit        The minimum deopsit amount accepted.
  */
 error USR_MinimumDeposit(uint256 amount, uint256 minimumDeposit);
 
@@ -22,7 +22,7 @@ error USR_MinimumDeposit(uint256 amount, uint256 minimumDeposit);
  * @notice Amount user attempted to stake is equivalent to zero staking shares after division.
  * @dev    If this occurs, the admin should look at increasing the minimum deposit size.
  *
- * @param amount The amount of tokens the user attmpted to stake.
+ * @param amount                The amount of tokens the user attmpted to stake.
  */
 error USR_StakeTooSmall(uint256 amount);
 
@@ -34,21 +34,21 @@ error USR_ZeroUnstake();
 /**
  * @notice The specified deposit ID does not exist for the caller.
  *
- * @param depositId The deposit ID provided for lookup.
+ * @param depositId             The deposit ID provided for lookup.
  */
 error USR_NoDeposit(uint256 depositId);
 
 /**
  * @notice The user is attempting to unstake a deposit which is still timelocked.
  *
- * @param depositId The deposit ID the user attempted to unstake.
+ * @param depositId             The deposit ID the user attempted to unstake.
  */
 error USR_StakeLocked(uint256 depositId);
 
 /**
  * @notice The user is attempting to unstake an amount which is equivalent to zero staking shares.
  *
- * @param amount The amount of tokens the user attempted to unstake.
+ * @param amount                The amount of tokens the user attempted to unstake.
  */
 error USR_UnstakeTooSmall(uint256 amount);
 
@@ -61,8 +61,8 @@ error USR_NoEpochs();
  * @notice The contract owner attempted to update rewards but specified too many initial or incremental epochs.
  * @dev    The maximum number of epochs is set at contract creation time and protects against the block gas limit.
  *
- * @param numEpochs The number of reward epochs that would have existed as a result of the call.
- * @param maximum The total allowed number of reward epochs.
+ * @param numEpochs             The number of reward epochs that would have existed as a result of the call.
+ * @param maximum               The total allowed number of reward epochs.
  */
 error USR_TooManyEpochs(uint256 numEpochs, uint256 maximum);
 
@@ -73,6 +73,8 @@ error USR_ZeroEpochLength();
 
 /**
  * @notice The contract owner attempted to update rewards but 0 rewards per epoch.
+ *         This can also happen if there is less than 1 wei of rewards per second of the
+ *         epoch - due to integer division this will also lead to 0 rewards.
  */
 error USR_ZeroRewardsPerEpoch();
 
@@ -80,7 +82,7 @@ error USR_ZeroRewardsPerEpoch();
  * @notice The contract owner attempted to look up the index of the epoch for the
  *         given timestamp, but there is no reward epoch scheduled for that time.
  *
- * @param timestamp The timestamp for which epoch lookup was attempted.
+ * @param timestamp             The timestamp for which epoch lookup was attempted.
  */
 error USR_NoEpochAtTime(uint256 timestamp);
 
@@ -88,7 +90,7 @@ error USR_NoEpochAtTime(uint256 timestamp);
  * @notice The caller attempted to stake with a lock value that did not
  *         correspond to a valid staking time.
  *
- * @param lock The provided lock value.
+ * @param lock                  The provided lock value.
  */
 error USR_InvalidLockValue(uint256 lock);
 
@@ -101,7 +103,7 @@ error USR_InvalidLockValue(uint256 lock);
 ///     or the progression of time.
 
 /**
- * @notice The caller attempted to perform an action which required the pool to be initialized.
+ * @notice The caller attempted to unpause the contract, but it is not yet initialized;
  */
 error STATE_NotInitialized();
 
@@ -165,8 +167,13 @@ error STATE_ContractKilled();
  *         A user's shares should not change, since they are concentrated/diluted by share
  *         minting and burning on other staknig and unstaking actions. This implies an
  *         accounting mistake in tracking total deposits.
+ *
+ * @param user                  The user who attempted to unstake.
+ * @param depositId             The unique ID of the user's stake.
+ * @param sharesToBurn          The amount of shares accounting determined must be burnt.
+ * @param stakeShares           The amount of shares for the given stake. Should be less than sharesToBurn.
  */
-error ACCT_TooManySharesBurned(uint256 sharesToBurn, uint256 stakeShares);
+error ACCT_TooManySharesBurned(address user, uint256 depositId, uint256 sharesToBurn, uint256 stakeShares);
 
 /**
  * @notice The owner attempted to replenish the pool with a new rewards schedule, but the pool
@@ -184,6 +191,10 @@ error ACCT_NoPreviousEpoch();
  *         meaning that reward accumulation accounting was missed for some time window, or an
  *         arithmetic error that led to earned rewards not being correctly accumulated for
  *         the epoch.
+ *
+ * @param epochRewardsEarned    The total rewards accounted for in the epoch.
+ * @param epochTotalRewards     The total rewards predetermined to be distributed over the epoch.
+ *                              Should not equal epochRewardsEarned.
  */
 error ACCT_PastEpochRewards(uint256 epochRewardsEarned, uint256 epochTotalRewards);
 
@@ -194,6 +205,11 @@ error ACCT_PastEpochRewards(uint256 epochRewardsEarned, uint256 epochTotalReward
  *         an issue with funding the distribution token when defining reward schedules, paying
  *         out too much of the token in previously-accounted rewards, or malicious activity
  *         that successfully drained the reward pool.
+ *
+ * @param tokenBalance          The amount of the distribution held by the contract.
+ * @param rewardsLeft           The total rewards amount of rewards scheduled to be released
+ *                              in the future. Should be less than tokenBalance.
+ *
  */
 error ACCT_CannotFundRewards(uint256 tokenBalance, uint256 rewardsLeft);
 
@@ -205,5 +221,8 @@ error ACCT_CannotFundRewards(uint256 tokenBalance, uint256 rewardsLeft);
  *         accounting issue in tracking total deposits, or malicious activity that allowed
  *         a user to mint shares without needing to deposit tokens (or, alternatively, a user
  *         that found a method to withdraw tokens while preserving their shares).
+ *
+ * @param totalShares           The total shares accounted for in the staking contract. Should be nonzero.
+ * @param totalDeposits         The total deposits in the staking contract. Should be zero.
  */
 error ACCT_SharesWithoutDeposits(uint256 totalShares, uint256 totalDeposits);
