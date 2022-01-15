@@ -12,8 +12,6 @@ interface TestContext {
   signers: SignerWithAddress[];
   admin: SignerWithAddress;
   user: SignerWithAddress;
-  tokenStake: ERC20;
-  tokenDist: ERC20;
   tokenStake: MockERC20;
   tokenDist: MockERC20;
   maxEpochs: number;
@@ -22,6 +20,7 @@ interface TestContext {
 
 describe("CellarStaking", () => {
   let ctx: TestContext;
+  const initialTokenAmount = 1000000; // 1,000,000
 
   const fixture = async (): Promise<TestContext> => {
     // Signers
@@ -62,7 +61,7 @@ describe("CellarStaking", () => {
         const { staking, user } = ctx;
 
         const stakingAsUser = await staking.connect(user);
-        await expect(stakingAsUser.stake(1000, 0)).to.be.revertedWith("STATE_NotInitialized");
+        await expect(stakingAsUser.stake(1000, 0)).to.be.revertedWith("STATE_ContractPaused");
       });
       it("should not allow a user to stake if the stake in under the minimum");
       it("should not allow a user to stake if there are no rewards left");
