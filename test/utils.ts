@@ -22,3 +22,7 @@ export async function increaseTime(seconds: number): Promise<void> {
 export async function setNextBlockTimestamp(epoch: number): Promise<void> {
   await ethers.provider.send("evm_setNextBlockTimestamp", [epoch]);
 }
+
+export function rand(min: number, max: number): number {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
