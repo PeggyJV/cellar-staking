@@ -39,6 +39,20 @@ error USR_ZeroUnstake();
 error USR_NoDeposit(uint256 depositId);
 
 /**
+ * @notice The user is attempting to cancel unbonding for a deposit which is not unbonding.
+ *
+ * @param depositId             The deposit ID the user attempted to cancel.
+ */
+error USR_NotUnbonding(uint256 depositId);
+
+/**
+ * @notice The user is attempting to unbond a deposit which has already been unbonded.
+ *
+ * @param depositId             The deposit ID the user attempted to unbond.
+ */
+error USR_AlreadyUnbonding(uint256 depositId);
+
+/**
  * @notice The user is attempting to unstake a deposit which is still timelocked.
  *
  * @param depositId             The deposit ID the user attempted to unstake.

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity >=0.8.4;
+pragma solidity >=0.8.10;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -7,6 +7,8 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 
 import "./Errors.sol";
 import "./interfaces/ICellarStaking.sol";
+
+// TODO: Cancel unbonding
 
 /**
  * @title Sommelier Staking
@@ -35,7 +37,10 @@ import "./interfaces/ICellarStaking.sol";
  *    those tokens for a specified amount of time. There are three locking options:
  *    one day, one week, or one month. Longer locking times receive larger 'boosts',
  *    that the deposit will receive a larger proportional amount of shares. A user
- *    may not unstake until the amount of time defined by the lock has elapsed.
+ *    may not unstake until they choose to unbond, and time defined by the lock has
+ *    elapsed during unbonding.
+ * 2) When a user wishes to withdraw, they must first "unbond" their stake, which starts
+ *    a timer equivalent to the lock time.
  * 2) Once the lock has elapsed, a user may unstake their deposit, either partially
  *    or in full. The user will continue to receive the same 'boosted' amount of rewards
  *    until they unstake. The user may unstake all of their deposits at once, as long
@@ -201,7 +206,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         UserStake storage s = stakes[msg.sender][depositId];
 
         // Do share accounting and populate user stake information
-        (uint256 boost, uint256 lockDuration) = _getBoost(lock);
+        (uint256 boost, ) = _getBoost(lock);
         uint256 amountWithBoost = amount + (amount * boost) / ONE;
 
         uint256 newShares = totalShares > 0
@@ -216,7 +221,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         s.shareSecondsAccumulated = 0;
         s.totalRewardsEarned = 0;
         s.rewardsClaimed = 0;
-        s.unlockTimestamp = block.timestamp + lockDuration;
+        s.unbondTimestamp = 0;
         s.lastAccountingTimestamp = block.timestamp;
         s.lock = lock;
 
@@ -231,16 +236,157 @@ contract CellarStaking is ICellarStaking, Ownable {
     }
 
     /**
-     * @notice  Unstake a specified amount from a certain deposited stake.
-     * @dev     The lock time for the specified deposit must have elapsed.
-     * @dev     Unstaking automatically claims available rewards for the deopsit.
+     * @notice  Unbond a specified amount from a certain deposited stake.
+     * @dev     After the unbond time elapses, the deposit can be unstaked.
      *
      * @param depositId             The specified deposit to unstake from.
-     * @param amount                The amount of the stakingToken to withdraw and return to the caller.
+     *
+     */
+    function unbond(uint256 depositId)
+        external
+        override
+        whenNotPaused
+        checkSupplyAccounting
+        updateTotalRewardAccounting
+        updateUserRewardAccounting(msg.sender)
+        updateRewardsLeft
+    {
+        _unbond(depositId);
+    }
+
+    /**
+     * @notice  Unbond all user deposits.
+     * @dev     Different deposits may have different timelocks.
+     *
+     */
+    function unbondAll()
+        external
+        override
+        whenNotPaused
+        checkSupplyAccounting
+        updateTotalRewardAccounting
+        updateUserRewardAccounting(msg.sender)
+        updateRewardsLeft
+    {
+        // Individually unbond each deposit
+        uint256[] memory depositIds = allUserStakes[msg.sender];
+
+        for (uint256 i = 0; i < depositIds.length; i++) {
+            UserStake storage s = stakes[msg.sender][depositIds[i]];
+
+            if (s.unbondTimestamp == 0) {
+                _unbond(depositIds[i]);
+            }
+        }
+    }
+
+    /**
+     * @dev     Contains all logic for processing an unbond operation.
+     *          For the given deposit, sets an unlock time, and
+     *          reverts boosts to 0.
+     *
+     * @param depositId             The specified deposit to unbond from.
+     */
+    function _unbond(uint256 depositId) internal {
+        // Fetch stake and make sure it is withdrawable
+        UserStake storage s = stakes[msg.sender][depositId];
+
+        uint256 depositAmount = s.amount;
+        if (depositAmount == 0) revert USR_NoDeposit(depositId);
+        if (s.unbondTimestamp > 0) revert USR_AlreadyUnbonding(depositId);
+
+        // Remove any lock boosts
+        s.amountWithBoost = depositAmount;
+        (, uint256 lockDuration) = _getBoost(s.lock);
+        s.unbondTimestamp = block.timestamp + lockDuration;
+
+        // TODO: Redo share accounting
+
+        emit Unbond(msg.sender, depositId, depositAmount);
+    }
+
+    /**
+     * @notice  Cancel an unbonding period for a stake that is currently unbonding.
+     * @dev     Resets the unbonding timer and reinstates any lock boosts.
+     *
+     * @param depositId             The specified deposit to unstake from.
+     *
+     */
+    function cancelUnbonding(uint256 depositId)
+        external
+        override
+        whenNotPaused
+        checkSupplyAccounting
+        updateTotalRewardAccounting
+        updateUserRewardAccounting(msg.sender)
+        updateRewardsLeft
+    {
+        _cancelUnbonding(depositId);
+    }
+
+    /**
+     * @notice  Cancel an unbonding period for all stakes.
+     * @dev     Only cancels stakes that are unbonding.
+     *
+     */
+    function cancelUnbondingAll()
+        external
+        override
+        whenNotPaused
+        checkSupplyAccounting
+        updateTotalRewardAccounting
+        updateUserRewardAccounting(msg.sender)
+        updateRewardsLeft
+    {
+        // Individually unbond each deposit
+        uint256[] memory depositIds = allUserStakes[msg.sender];
+
+        for (uint256 i = 0; i < depositIds.length; i++) {
+            UserStake storage s = stakes[msg.sender][depositIds[i]];
+
+            if (s.unbondTimestamp > 0) {
+                _cancelUnbonding(depositIds[i]);
+            }
+        }
+    }
+
+    /**
+     * @dev     Contains all logic for cancelling an unbond operation.
+     *          For the given deposit, resets the unbonding timer, and
+     *          reverts boosts to amount determined by lock.
+     *
+     * @param depositId             The specified deposit to unbond from.
+     */
+    function _cancelUnbonding(uint256 depositId) internal {
+        // Fetch stake and make sure it is withdrawable
+        UserStake storage s = stakes[msg.sender][depositId];
+
+        uint256 depositAmount = s.amount;
+        if (depositAmount == 0) revert USR_NoDeposit(depositId);
+        if (s.unbondTimestamp == 0) revert USR_NotUnbonding(depositId);
+
+        // Reinstate
+        (uint256 boost, ) = _getBoost(s.lock);
+        uint256 amountWithBoost = s.amount + (s.amount * boost) / ONE;
+
+        // TODO: Redo share accounting
+
+        s.amountWithBoost = amountWithBoost;
+        s.unbondTimestamp = 0;
+
+        emit CancelUnbond(msg.sender, depositId);
+    }
+
+    /**
+     * @notice  Unstake a specified amount from a certain deposited stake.
+     * @dev     The unbonding time for the specified deposit must have elapsed.
+     * @dev     Unstaking automatically claims available rewards for the deposit.
+     *
+     * @param depositId             The specified deposit to unstake from.
      *
      * @return reward               The amount of accumulated rewards since the last reward claim.
      */
-    function unstake(uint256 depositId, uint256 amount)
+    function unstake(uint256 depositId)
         external
         override
         whenNotPaused
@@ -250,14 +396,12 @@ contract CellarStaking is ICellarStaking, Ownable {
         updateRewardsLeft
         returns (uint256 reward)
     {
-        if (amount == 0) revert USR_ZeroUnstake();
-
-        return _unstake(depositId, amount);
+        return _unstake(depositId);
     }
 
     /**
      * @notice  Unstake all user deposits.
-     * @dev     The lock times for the all user deposits must have elapsed.
+     * @dev     Only unstakes rewards that are unbonded.
      * @dev     Unstaking automatically claims all available rewards.
      *
      * @return rewards              The amount of accumulated rewards since the last reward claim.
@@ -276,7 +420,11 @@ contract CellarStaking is ICellarStaking, Ownable {
         uint256[] memory depositIds = allUserStakes[msg.sender];
 
         for (uint256 i = 0; i < depositIds.length; i++) {
-            rewards[i] = _unstake(depositIds[i], MAX_UINT);
+            UserStake storage s = stakes[msg.sender][depositIds[i]];
+
+            if (s.unbondTimestamp > 0 && block.timestamp >= s.unbondTimestamp) {
+                rewards[i] = _unstake(depositIds[i]);
+            }
         }
     }
 
@@ -288,42 +436,38 @@ contract CellarStaking is ICellarStaking, Ownable {
      *          rewards for the given deposit.
      *
      * @param depositId             The specified deposit to unstake from.
-     * @param amount                The amount of the stakingToken to withdraw and return to the caller.
-     *                              If an amount larger than the deposit amount is specified, return
-     *                              the entire deposit.
      */
-    function _unstake(uint256 depositId, uint256 amount) internal returns (uint256 reward) {
+    function _unstake(uint256 depositId) internal returns (uint256 reward) {
         // Fetch stake and make sure it is withdrawable
         UserStake storage s = stakes[msg.sender][depositId];
 
         uint256 depositAmount = s.amount;
         if (depositAmount == 0) revert USR_NoDeposit(depositId);
-        if (block.timestamp < s.unlockTimestamp) revert USR_StakeLocked(depositId);
+        if (block.timestamp < s.unbondTimestamp || s.unbondTimestamp == 0) revert USR_StakeLocked(depositId);
 
         // Start unstaking
 
-        // Can pass MAX_UINT to make sure all is unstaked
-        if (amount > depositAmount) {
-            amount = depositAmount;
-        }
-
         // Do share accounting and figure out how many to burn
         (uint256 boost, ) = _getBoost(s.lock);
-        uint256 amountWithBoost = amount + (amount * boost) / ONE;
+        uint256 amountWithBoost = depositAmount + (depositAmount * boost) / ONE;
         uint256 sharesToBurn = (totalShares * amountWithBoost) / totalDepositsWithBoost;
 
+<<<<<<< HEAD
         if (sharesToBurn == 0) revert USR_UnstakeTooSmall(amount);
+=======
+        if (sharesToBurn == 0) revert USR_UnstakeTooSmall(depositAmount);
+>>>>>>> playpen
         if (sharesToBurn > s.shares) revert ACCT_TooManySharesBurned(msg.sender, depositId, sharesToBurn, s.shares);
 
         s.shares -= sharesToBurn;
 
         // Update global state
-        totalDeposits -= amount;
+        totalDeposits -= depositAmount;
         totalDepositsWithBoost -= amountWithBoost;
         totalShares -= sharesToBurn;
 
         // Distribute stake
-        stakingToken.safeTransfer(msg.sender, amount);
+        stakingToken.safeTransfer(msg.sender, depositAmount);
 
         // Distribute rewards via claim
         reward = _claim(depositId);
@@ -331,7 +475,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         // Do final accounting check
         _checkSupplyAccounting();
 
-        emit Unstake(msg.sender, depositId, amount);
+        emit Unstake(msg.sender, depositId, depositAmount);
     }
 
     /**
