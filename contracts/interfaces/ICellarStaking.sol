@@ -14,6 +14,8 @@ interface ICellarStaking {
 
     event Funding(address stakingToken, address distributionToken, uint256 rewardAmount);
     event Stake(address indexed user, uint256 depositId, uint256 amount);
+    event Unbond(address indexed user, uint256 depositId, uint256 amount);
+    event CancelUnbond(address indexed user, uint256 depositId);
     event Unstake(address indexed user, uint256 depositId, uint256 amount);
     event Claim(address indexed user, uint256 depositId, uint256 amount);
     event EmergencyStop(address owner, bool claimable);
@@ -41,7 +43,7 @@ interface ICellarStaking {
         uint256 shareSecondsAccumulated;
         uint256 totalRewardsEarned;
         uint256 rewardsClaimed;
-        uint256 unlockTimestamp;
+        uint256 unbondTimestamp;
         uint256 lastAccountingTimestamp;
         Lock lock;
     }
@@ -80,7 +82,15 @@ interface ICellarStaking {
 
     function stake(uint256 amount, Lock lock) external;
 
-    function unstake(uint256 depositId, uint256 amount) external returns (uint256 reward);
+    function unbond(uint256 depositId) external;
+
+    function unbondAll() external;
+
+    function cancelUnbonding(uint256 depositId) external;
+
+    function cancelUnbondingAll() external;
+
+    function unstake(uint256 depositId) external returns (uint256 reward);
 
     function unstakeAll() external returns (uint256[] memory rewards);
 
