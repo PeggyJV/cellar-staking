@@ -379,7 +379,7 @@ contract CellarStaking is ICellarStaking, Ownable {
     }
 
     /**
-     * @notice  Unstake a specified amount from a certain deposited stake.
+     * @notice  Unstake a specific deposited stake.
      * @dev     The unbonding time for the specified deposit must have elapsed.
      * @dev     Unstaking automatically claims available rewards for the deposit.
      *
@@ -453,11 +453,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         uint256 amountWithBoost = depositAmount + (depositAmount * boost) / ONE;
         uint256 sharesToBurn = (totalShares * amountWithBoost) / totalDepositsWithBoost;
 
-<<<<<<< HEAD
-        if (sharesToBurn == 0) revert USR_UnstakeTooSmall(amount);
-=======
         if (sharesToBurn == 0) revert USR_UnstakeTooSmall(depositAmount);
->>>>>>> playpen
         if (sharesToBurn > s.shares) revert ACCT_TooManySharesBurned(msg.sender, depositId, sharesToBurn, s.shares);
 
         s.shares -= sharesToBurn;
@@ -551,6 +547,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         s.rewardsClaimed += reward;
 
         // Distribute reward
+        console.log('CellarStaking: expected reward %s', reward);
         distributionToken.safeTransfer(msg.sender, reward);
 
         emit Claim(msg.sender, depositId, reward);
@@ -903,7 +900,7 @@ contract CellarStaking is ICellarStaking, Ownable {
 
                 // For each epoch in window, calculate rewards
                 for (uint256 j = epochAtLastAccounting; j <= epochNow; j++) {
-                    totalRewardsEarned += _calculateStakeRewardsForEpoch(i, s);
+                    totalRewardsEarned += _calculateStakeRewardsForEpoch(j, s);
                 }
 
                 // Overwrite, not increment, the accrued rewards. Previous loop
