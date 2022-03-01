@@ -388,7 +388,7 @@ describe("CellarStaking", () => {
       });
     });
 
-    describe.only("unstake", () => {
+    describe("unstake", () => {
       describe("uninitialized", async () => {
         it("should not allow unstaking if the rewards are not initialized", async () => {
           const { stakingUser } = ctx;
@@ -412,7 +412,7 @@ describe("CellarStaking", () => {
           await expect(stakingUser.unstake(0)).to.be.revertedWith("USR_StakeLocked");
         });
 
-        it.only("should require a non-zero amount to unstake", async () => {
+        it("should require a non-zero amount to unstake", async () => {
           const { stakingUser, user } = ctx;
           const bal = await ctx.tokenDist.balanceOf(stakingUser.address);
           console.log("CellarStaking tokenDist balance: ", bal.toNumber());

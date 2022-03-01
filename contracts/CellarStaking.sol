@@ -223,7 +223,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         s.totalRewardsEarned = 0;
         s.rewardsClaimed = 0;
         s.unbondTimestamp = 0;
-        s.lastAccountingTimestamp = block.timestamp;
+        s.depositTimestamp = block.timestamp;
         s.lock = lock;
 
         // Update global state
@@ -296,12 +296,20 @@ contract CellarStaking is ICellarStaking, Ownable {
         if (depositAmount == 0) revert USR_NoDeposit(depositId);
         if (s.unbondTimestamp > 0) revert USR_AlreadyUnbonding(depositId);
 
+        uint256 shareAmountReduced = s.amountWithBoost - depositAmount;
+
         // Remove any lock boosts
         s.amountWithBoost = depositAmount;
         (, uint256 lockDuration) = _getBoost(s.lock);
         s.unbondTimestamp = block.timestamp + lockDuration;
 
-        // TODO: Redo share accounting
+        uint256 updatedShares = (totalShares * s.amountWithBoost) / totalDepositsWithBoost;
+        uint256 sharesToBurn = s.shares - updatedShares;
+
+        s.shares = updatedShares;
+
+        totalShares -= sharesToBurn;
+        totalDepositsWithBoost -= shareAmountReduced;
 
         emit Unbond(msg.sender, depositId, depositAmount);
     }
@@ -449,14 +457,14 @@ contract CellarStaking is ICellarStaking, Ownable {
         // Start unstaking
 
         // Do share accounting and figure out how many to burn
-        (uint256 boost, ) = _getBoost(s.lock);
-        uint256 amountWithBoost = depositAmount + (depositAmount * boost) / ONE;
+        uint256 amountWithBoost = s.amountWithBoost;
         uint256 sharesToBurn = (totalShares * amountWithBoost) / totalDepositsWithBoost;
 
         if (sharesToBurn == 0) revert USR_UnstakeTooSmall(depositAmount);
         if (sharesToBurn > s.shares) revert ACCT_TooManySharesBurned(msg.sender, depositId, sharesToBurn, s.shares);
 
         s.shares -= sharesToBurn;
+        s.amountWithBoost = 0;
 
         // Update global state
         totalDeposits -= depositAmount;
@@ -547,7 +555,6 @@ contract CellarStaking is ICellarStaking, Ownable {
         s.rewardsClaimed += reward;
 
         // Distribute reward
-        console.log('CellarStaking: expected reward %s', reward);
         distributionToken.safeTransfer(msg.sender, reward);
 
         emit Claim(msg.sender, depositId, reward);
@@ -892,21 +899,18 @@ contract CellarStaking is ICellarStaking, Ownable {
 
             // If shares are 0, stake is no longer relevant - it has been unstaked
             // Only update if program hasn't ended or program has ended but accounting hasn't caught up
-            if (s.shares > 0 && (rewardsOngoing || s.lastAccountingTimestamp < endTimestamp)) {
+            if (s.shares > 0 && rewardsOngoing) {
                 // Calculate time passed since stake was last accounted for
                 uint256 epochNow = rewardsOngoing ? currentEpoch() : epochAtTime(endTimestamp - 1);
-                uint256 epochAtLastAccounting = epochAtTime(s.lastAccountingTimestamp);
-                uint256 totalRewardsEarned = 0;
+                uint256 epochAtDeposit = epochAtTime(s.depositTimestamp);
 
                 // For each epoch in window, calculate rewards
-                for (uint256 j = epochAtLastAccounting; j <= epochNow; j++) {
+                uint256 totalRewardsEarned = 0;
+                for (uint256 j = epochAtDeposit; j < epochNow; j++) {
                     totalRewardsEarned += _calculateStakeRewardsForEpoch(j, s);
                 }
 
-                // Overwrite, not increment, the accrued rewards. Previous loop
-                // always calculates the total epoch rewards
                 s.totalRewardsEarned = totalRewardsEarned;
-                s.lastAccountingTimestamp = block.timestamp;
             }
         }
 
@@ -982,10 +986,7 @@ contract CellarStaking is ICellarStaking, Ownable {
     function _calculateStakeRewardsForEpoch(uint256 epochIdx, UserStake storage s) internal returns (uint256) {
         RewardEpoch memory epoch = rewardEpochs[epochIdx];
 
-        // If we have already done some accounting for this epoch, don't re-calculate
-        uint256 epochStart = s.lastAccountingTimestamp > epoch.startTimestamp
-            ? s.lastAccountingTimestamp
-            : epoch.startTimestamp;
+        uint256 epochStart = epoch.startTimestamp;
 
         // If we have not reached epochEnd, then only consider partial epoch
         uint256 epochEnd = epochStart + epoch.duration;

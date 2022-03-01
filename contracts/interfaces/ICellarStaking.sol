@@ -41,10 +41,11 @@ interface ICellarStaking {
         uint256 amountWithBoost;
         uint256 shares;
         uint256 shareSecondsAccumulated;
+        uint256 currentEpochRewards;
         uint256 totalRewardsEarned;
         uint256 rewardsClaimed;
         uint256 unbondTimestamp;
-        uint256 lastAccountingTimestamp;
+        uint256 depositTimestamp;
         Lock lock;
     }
 
