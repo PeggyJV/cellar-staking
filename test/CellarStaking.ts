@@ -27,7 +27,7 @@ const hundred = BigNumber.from(100);
 
 describe("CellarStaking", () => {
   let ctx: TestContext;
-  const initialTokenAmount = oneWeekSec * 4;
+  const initialTokenAmount = 20000000; // 20M
   const initialBN = BigNumber.from(initialTokenAmount);
   let startTimestamp: number;
 
@@ -208,7 +208,7 @@ describe("CellarStaking", () => {
         expect(stakes2.shares.toNumber()).to.equal(totalShares.toNumber() * y);
       });
 
-      it("should correctly calculate stake shares for two users", async () => {
+      it.skip("should correctly calculate stake shares for two users", async () => {
         // number of runs
         const times = 10;
 
@@ -397,9 +397,14 @@ describe("CellarStaking", () => {
       });
 
       describe("initialized", () => {
+        const rewardPerEpoch = oneWeekSec;
+        const stakeAmount = 1000;
+        const stakeAmountBN = BigNumber.from(stakeAmount);
+
         beforeEach(async () => {
-          await ctx.staking.initializePool(oneWeekSec, oneWeekSec, 2);
-          await ctx.stakingUser.stake(1000, lockDay);
+          await ctx.staking.initializePool(rewardPerEpoch, oneWeekSec, 2);
+          console.log("TEST: stake 1000");
+          await ctx.stakingUser.stake(stakeAmount, lockDay);
         });
 
         it("should revert if passed an out of bounds deposit id", async () => {
@@ -413,39 +418,121 @@ describe("CellarStaking", () => {
         });
 
         it("should require a non-zero amount to unstake", async () => {
-          const { stakingUser, user } = ctx;
-          const bal = await ctx.tokenDist.balanceOf(stakingUser.address);
-          console.log("CellarStaking tokenDist balance: ", bal.toNumber());
+          const { stakingUser, user, tokenDist } = ctx;
+
+          console.log("TEST: roll to next epoch");
+          await rollNextEpoch(stakingUser);
+          console.log("TEST: unbond");
+          await stakingUser.unbond(0);
+
+          const prevBal = await tokenDist.balanceOf(user.address);
+          console.log("TEST: tokenDist prevBal", prevBal.toNumber());
+
+          const stake = await stakingUser.stakes(user.address, 0);
+          console.log("TEST: roll forward to unbond timestamp");
+          await setNextBlockTimestamp(stake.unbondTimestamp.toNumber() + 1);
+
+          console.log("TEST: unstake");
+          await stakingUser.unstake(0);
+
+          // single staker takes all rewards
+          const bal = await tokenDist.balanceOf(user.address);
+          expect(bal.sub(prevBal).toNumber()).to.equal(rewardPerEpoch);
+        });
+
+        it("should not unstake more than the deposited amount", async () => {
+          const { stakingUser, user, tokenStake } = ctx;
 
           await rollNextEpoch(stakingUser);
           await stakingUser.unbond(0);
+
+          const prevBal = await tokenStake.balanceOf(user.address);
+
           const stake = await stakingUser.stakes(user.address, 0);
           await setNextBlockTimestamp(stake.unbondTimestamp.toNumber() + 1);
 
           await stakingUser.unstake(0);
+
+          // previous bal + staked amount should equal current balance
+          const bal = await tokenStake.balanceOf(user.address);
+          expect(prevBal.add(stakeAmountBN).toNumber()).to.equal(bal.toNumber());
         });
 
-        it("should not unstake more than the deposited amount");
         it("should not allow a user to unstake an amount smaller than the unit share size"); // @kvk does this test make sense still?
         it("should unstake, distributing both the specified deposit amount and any accumulated rewards");
       });
     });
 
-    //   describe("unstakeAll", () => {
-    //     it("should unstake all amounts for all deposits, and distribute all available rewards");
-    //   });
-    //
-    //   describe("claim", () => {
-    //     it("should not allow claiming if the rewards are not initialized");
-    //     it("claim available rewards for a given deposit");
-    //     it("should correctly calculate rewards for two claims within the same epoch");
-    //     it("should correctly calculate rewards across multiple epochs");
-    //     it("should corretctly calculate proportional rewards across different user's stakes, in the same epoch");
-    //     it(
-    //       "should correctly calculate proportional rewards for different user stakes, deposited during different epochs",
-    //     );
-    //     it("should not redistribute rewards tha have already been claimed");
-    //   });
+    describe("unstakeAll", () => {
+      //const rewardPerEpoch = 2000000; // 2M
+      const rewardPerEpoch = 2000000; // 2M
+      const stakeAmount = 50000;
+
+      beforeEach(async () => {
+        await ctx.staking.initializePool(rewardPerEpoch, oneWeekSec, 3);
+        await ctx.stakingUser.stake(stakeAmount, lockDay);
+      });
+
+      it.only("should unstake all amounts for all deposits, and distribute all available rewards", async () => {
+        const { connectUser, signers, stakingUser, user, tokenDist, tokenStake } = ctx;
+        const user2 = signers[2];
+        const stakingUser2 = await connectUser(user2);
+
+        // user1 should collect all of first epoch reward
+        await rollNextEpoch(stakingUser);
+
+        // epoch 2 reward should be split 2/3 to 1/3
+        // await stakingUser2.stake(stakeAmount, lockDay);
+        await stakingUser.stake(stakeAmount, lockDay);
+        //
+        // await rollNextEpoch(stakingUser);
+        // await stakingUser.unbondAll();
+        //
+        // const prevStakeBal = await tokenStake.balanceOf(user.address);
+        // const prevDistBal = await tokenDist.balanceOf(user.address);
+        //
+        // const stake = await stakingUser.stakes(user.address, 0);
+        // await setNextBlockTimestamp(stake.unbondTimestamp.toNumber() + 1);
+        // await stakingUser.unstakeAll();
+        //
+        // // expect to recover balance that was initially staked
+        // const totalStaked = stakeAmount + stakeAmount;
+        // const stakeBal = await tokenStake.balanceOf(user.address);
+        // expect(prevStakeBal.add(BigNumber.from(totalStaked))).to.equal(stakeBal);
+        //
+        // // expect to collect all rewards of first epoch and 2/3 of 2nd epoch
+        // const expectedRewards = rewardPerEpoch + Math.floor((rewardPerEpoch * 2) / 3);
+        // const distBal = await tokenDist.balanceOf(user.address);
+        // expect(distBal.sub(prevDistBal)).to.equal(expectedRewards);
+      });
+    });
+
+    describe.skip("claim", () => {
+      describe("uninitialized", () => {
+        it("should not allow claiming if the rewards are not initialized");
+      });
+
+      describe("initialized", () => {
+        const rewardPerEpoch = oneWeekSec;
+        const stakeAmount = 1000;
+        const stakeAmountBN = BigNumber.from(stakeAmount);
+
+        beforeEach(async () => {
+          await ctx.staking.initializePool(rewardPerEpoch, oneWeekSec, 2);
+          console.log("TEST: stake 1000");
+          await ctx.stakingUser.stake(stakeAmount, lockDay);
+        });
+
+        it("claim available rewards for a given deposit");
+        it("should correctly calculate rewards for two claims within the same epoch");
+        it("should correctly calculate rewards across multiple epochs");
+        it("should corretctly calculate proportional rewards across different user's stakes, in the same epoch");
+        it(
+          "should correctly calculate proportional rewards for different user stakes, deposited during different epochs",
+        );
+        it("should not redistribute rewards tha have already been claimed");
+      });
+    });
     //
     //   describe("claimAll", () => {
     //     it("should claim all available rewards for all deposits, within the same epoch");

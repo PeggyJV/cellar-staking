@@ -25,14 +25,17 @@ export function rand(min: number, max: number): number {
 // TIME
 export async function increaseTime(seconds: number): Promise<void> {
   await ethers.provider.send("evm_increaseTime", [seconds]);
+  await ethers.provider.send("evm_mine", []);
 }
 
 export async function setNextBlockTimestamp(epoch: number): Promise<void> {
   await ethers.provider.send("evm_setNextBlockTimestamp", [epoch]);
+  await ethers.provider.send("evm_mine", []);
 }
 
 export async function rollNextEpoch(staking: CellarStaking): Promise<number> {
   const currentEpoch = (await staking.currentEpoch()).toNumber();
+  console.log("currentEpoch", currentEpoch);
   const nextEpochIdx = currentEpoch + 1;
 
   const nextEpoch = await staking.rewardEpochs(nextEpochIdx);
