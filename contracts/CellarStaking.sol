@@ -605,76 +605,65 @@ contract CellarStaking is ICellarStaking, Ownable {
      * @notice Specify an initial epoch schedule for staking rewards.
      * @dev    Can only be called by owner. Owner must approve distributionToken for withdrawal.
      *
-     * @param _rewardsPerEpoch      The total reward pool for each epoch.
+     * @param _rewardsPerSecond     The rewards per second emitted during the epoch.
      * @param _epochLength          The length of each epoch in seconds.
-     * @param _numEpochs            The number of epochs to schedule.
      */
     function initializePool(
-        uint256 _rewardsPerEpoch,
-        uint256 _epochLength,
-        uint256 _numEpochs
+        uint256 _rewardsPerSecond,
+        uint256 _epochLength
     ) external override onlyOwner {
         if (startTimestamp > 0) revert STATE_AlreadyInitialized();
-        if (_numEpochs == 0) revert USR_NoEpochs();
-        if (_numEpochs > maxNumEpochs) revert USR_TooManyEpochs(_numEpochs, maxNumEpochs);
-        if (_epochLength == 0) revert USR_ZeroEpochLength();
-        if (_rewardsPerEpoch < _epochLength) revert USR_ZeroRewardsPerEpoch();
 
         // Mark starting point for rewards accounting
         paused = false;
         startTimestamp = block.timestamp;
         lastAccountingTimestamp = startTimestamp;
-        uint256 currentTimestamp = startTimestamp;
 
-        // Create new epochs
-        for (uint256 i = 0; i < _numEpochs; i++) {
-            rewardEpochs.push(RewardEpoch(currentTimestamp, _epochLength, _rewardsPerEpoch, 0, 0));
-            currentTimestamp += _epochLength;
-        }
-
-        endTimestamp = currentTimestamp;
-
-        // Fund reward pool from owner
-        uint256 rewardAmount = _rewardsPerEpoch * _numEpochs;
-        distributionToken.safeTransferFrom(msg.sender, address(this), rewardAmount);
-
-        emit Funding(address(stakingToken), address(distributionToken), rewardAmount);
+        _addReward(_rewardsPerSecond, _epochLength, startTimestamp);
     }
 
     /**
      * @notice Specify future epoch schedules for staking rewards.
      * @dev    Can only be called by owner. Owner must approve distributionToken for withdrawal.
      *
-     * @param _rewardsPerEpoch      The total reward pool for each epoch.
+     * @param _rewardsPerSecond     The rewards per second emitted during the epoch.
      * @param _epochLength          The length of each epoch in seconds.
-     * @param _numEpochs            The number of epochs to schedule.
      */
     function replenishPool(
-        uint256 _rewardsPerEpoch,
-        uint256 _epochLength,
-        uint256 _numEpochs
+        uint256 _rewardsPerSecond,
+        uint256 _epochLength
     ) external override whenNotPaused onlyOwner {
-        if (_numEpochs == 0) revert USR_NoEpochs();
-        if (rewardEpochs.length + _numEpochs > maxNumEpochs)
-            revert USR_TooManyEpochs(rewardEpochs.length + _numEpochs, maxNumEpochs);
-        if (_epochLength == 0) revert USR_ZeroEpochLength();
-        if (_rewardsPerEpoch < _epochLength) revert USR_ZeroRewardsPerEpoch();
+        if (rewardEpochs.length == 0) revert USR_NoEpochs();
 
         RewardEpoch memory lastEpoch = rewardEpochs[rewardEpochs.length - 1];
-        if (lastEpoch.startTimestamp > 0) revert ACCT_NoPreviousEpoch();
+        if (lastEpoch.startTimestamp == 0) revert ACCT_NoPreviousEpoch();
 
-        uint256 currentTimestamp = lastEpoch.startTimestamp + lastEpoch.duration;
+        uint256 nextStartTimestamp = lastEpoch.startTimestamp + lastEpoch.duration;
+
+        _addReward(_rewardsPerSecond, _epochLength, nextStartTimestamp);
+    }
+
+    /**
+     * @dev     Add a new epoch to the list of tracked epochs
+     *
+     * @param _rewardsPerSecond     The rewards per second emitted during the epoch.
+     * @param _epochLength          The length of each epoch in seconds.
+     * @param _epochStartTimestamp  The time the new epoch should start.
+     */
+    function _addReward(
+        uint256 _rewardsPerSecond,
+        uint256 _epochLength,
+        uint256 _epochStartTimestamp
+    ) internal {
+        if (rewardEpochs.length == maxNumEpochs) revert USR_TooManyEpochs(maxNumEpochs);
+        if (_epochLength == 0) revert USR_ZeroEpochLength();
+        if (_rewardsPerSecond == 0) revert USR_ZeroRewardsPerEpoch();
 
         // Create new epochs
-        for (uint256 i = 0; i < _numEpochs; i++) {
-            rewardEpochs.push(RewardEpoch(currentTimestamp, _epochLength, _rewardsPerEpoch, 0, 0));
-            currentTimestamp += _epochLength;
-        }
-
-        endTimestamp = currentTimestamp;
+        rewardEpochs.push(RewardEpoch(_epochStartTimestamp, _epochLength, _rewardsPerSecond, 0, 0));
 
         // Fund reward pool from owner
-        uint256 rewardAmount = _rewardsPerEpoch * _numEpochs;
+        uint256 rewardAmount = _rewardsPerSecond * _epochLength;
         distributionToken.safeTransferFrom(msg.sender, address(this), rewardAmount);
 
         emit Funding(address(stakingToken), address(distributionToken), rewardAmount);
@@ -751,6 +740,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         uint256 timeElapsed = timestamp - startTimestamp;
 
         while (timeElapsed > 0) {
+
             if (epochIdx > rewardEpochs.length - 1) {
                 revert USR_NoEpochAtTime(timestamp);
             }
@@ -760,7 +750,7 @@ contract CellarStaking is ICellarStaking, Ownable {
 
             // Decrement duration of epoch
             if (e.duration >= timeElapsed) {
-                timeElapsed = 0;
+                break;
             } else {
                 timeElapsed -= e.duration;
                 epochIdx++;
@@ -777,7 +767,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         amount = 0;
 
         for (uint256 i = 0; i < rewardEpochs.length; i++) {
-            amount += rewardEpochs[i].totalRewards;
+            amount += rewardEpochs[i].rewardsPerSecond * rewardEpochs[i].duration;
         }
     }
 
@@ -926,7 +916,8 @@ contract CellarStaking is ICellarStaking, Ownable {
 
         for (uint256 i = 0; i < rewardEpochs.length; i++) {
             RewardEpoch memory e = rewardEpochs[i];
-            amount += e.totalRewards - e.rewardsEarned;
+            uint256 totalEpochRewards = e.rewardsPerSecond * e.duration;
+            amount += totalEpochRewards - e.rewardsEarned;
         }
 
         rewardsLeft = amount;
@@ -961,16 +952,17 @@ contract CellarStaking is ICellarStaking, Ownable {
         uint256 timeElapsed = accountingEndTime - accountingStartTime;
 
         // Calculate rewards based on time elapsed in epoch
-        uint256 epochRewardsPerSecond = epoch.totalRewards / epoch.duration;
-        uint256 rewardsForTime = epochRewardsPerSecond * timeElapsed;
+        uint256 rewardsForTime = epoch.rewardsPerSecond * timeElapsed;
 
         epoch.rewardsEarned += rewardsForTime;
 
         // If we are completing an epoch, check our accounting. Rewards earned
         // must equal total rewards
         if (block.timestamp > epochEndTimestamp) {
-            if (epoch.rewardsEarned != epoch.totalRewards)
-                revert ACCT_PastEpochRewards(epoch.rewardsEarned, epoch.totalRewards);
+            uint256 epochTotalRewards = epoch.rewardsPerSecond * epoch.duration;
+
+            if (epoch.rewardsEarned != epochTotalRewards)
+                revert ACCT_PastEpochRewards(epoch.rewardsEarned, epochTotalRewards);
         }
 
         // Figure out total share-seconds accumulated

@@ -72,13 +72,12 @@ error USR_UnstakeTooSmall(uint256 amount);
 error USR_NoEpochs();
 
 /**
- * @notice The contract owner attempted to update rewards but specified too many initial or incremental epochs.
+ * @notice The contract owner attempted to update rewards but had already reached the maximum number of epochs.
  * @dev    The maximum number of epochs is set at contract creation time and protects against the block gas limit.
  *
- * @param numEpochs             The number of reward epochs that would have existed as a result of the call.
  * @param maximum               The total allowed number of reward epochs.
  */
-error USR_TooManyEpochs(uint256 numEpochs, uint256 maximum);
+error USR_TooManyEpochs(uint256 maximum);
 
 /**
  * @notice The contract owner attempted to update rewards but specified an epoch of length 0.

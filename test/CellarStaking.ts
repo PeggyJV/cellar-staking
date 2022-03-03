@@ -63,7 +63,7 @@ describe("CellarStaking", () => {
     await tokenStakeUser.increaseAllowance(staking.address, initialTokenAmount);
 
     // test chain starts at block.timestamp 0, must increase it to pass startTimestamp checks
-    startTimestamp = Date.now();
+    startTimestamp = Math.floor(Date.now() / 1000);
     await setNextBlockTimestamp(startTimestamp);
 
     const connectUser = async (signer: SignerWithAddress): Promise<CellarStaking> => {
@@ -102,7 +102,7 @@ describe("CellarStaking", () => {
 
     describe("stake, initialized to one wei per epoch sec", () => {
       beforeEach(async () => {
-        await ctx.staking.initializePool(oneDaySec, oneDaySec, 1);
+        await ctx.staking.initializePool(1, oneDaySec);
       });
 
       it("should not allow a user to stake if the stake is under the minimum", async () => {
@@ -214,7 +214,7 @@ describe("CellarStaking", () => {
 
         for (let i = 0; i < times; i++) {
           ctx = await loadFixture(fixture);
-          await ctx.staking.initializePool(oneDaySec, oneDaySec, 1);
+          await ctx.staking.initializePool(1, oneDaySec);
           const { connectUser, signers, stakingUser, user } = ctx;
 
           // javascript floating point arithmetic is imprecise
@@ -250,7 +250,7 @@ describe("CellarStaking", () => {
         for (let i = 0; i < times; i++) {
           // reset fixture
           ctx = await loadFixture(fixture);
-          await ctx.staking.initializePool(oneDaySec, oneDaySec, 1);
+          await ctx.staking.initializePool(1, oneDaySec);
           const { connectUser } = ctx;
 
           // setup fuzzing scenario
@@ -402,7 +402,8 @@ describe("CellarStaking", () => {
         const stakeAmountBN = BigNumber.from(stakeAmount);
 
         beforeEach(async () => {
-          await ctx.staking.initializePool(rewardPerEpoch, oneWeekSec, 2);
+          await ctx.staking.initializePool(1, oneWeekSec);
+          await ctx.staking.replenishPool(1, oneWeekSec);
           console.log("TEST: stake 1000");
           await ctx.stakingUser.stake(stakeAmount, lockDay);
         });
@@ -469,7 +470,9 @@ describe("CellarStaking", () => {
       const stakeAmount = 50000;
 
       beforeEach(async () => {
-        await ctx.staking.initializePool(rewardPerEpoch, oneWeekSec, 3);
+        await ctx.staking.initializePool(1, oneWeekSec);
+        await ctx.staking.replenishPool(1, oneWeekSec);
+        await ctx.staking.replenishPool(1, oneWeekSec);
         await ctx.stakingUser.stake(stakeAmount, lockDay);
       });
 
@@ -518,7 +521,8 @@ describe("CellarStaking", () => {
         const stakeAmountBN = BigNumber.from(stakeAmount);
 
         beforeEach(async () => {
-          await ctx.staking.initializePool(rewardPerEpoch, oneWeekSec, 2);
+          await ctx.staking.initializePool(1, oneWeekSec);
+          await ctx.staking.replenishPool(1, oneWeekSec);
           console.log("TEST: stake 1000");
           await ctx.stakingUser.stake(stakeAmount, lockDay);
         });

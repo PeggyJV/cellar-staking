@@ -35,7 +35,6 @@ export async function setNextBlockTimestamp(epoch: number): Promise<void> {
 
 export async function rollNextEpoch(staking: CellarStaking): Promise<number> {
   const currentEpoch = (await staking.currentEpoch()).toNumber();
-  console.log("currentEpoch", currentEpoch);
   const nextEpochIdx = currentEpoch + 1;
 
   const nextEpoch = await staking.rewardEpochs(nextEpochIdx);

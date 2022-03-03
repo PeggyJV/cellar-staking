@@ -31,7 +31,7 @@ interface ICellarStaking {
     struct RewardEpoch {
         uint256 startTimestamp;
         uint256 duration;
-        uint256 totalRewards;
+        uint256 rewardsPerSecond;
         uint256 rewardsEarned;
         uint256 shareSecondsAccumulated;
     }
@@ -106,15 +106,13 @@ interface ICellarStaking {
     // ================ Admin Functions ================
 
     function initializePool(
-        uint256 _rewardsPerEpoch,
-        uint256 _epochLength,
-        uint256 _numEpochs
+        uint256 _rewardsPerSecond,
+        uint256 _epochLength
     ) external;
 
     function replenishPool(
-        uint256 _rewardsPerEpoch,
-        uint256 _epochLength,
-        uint256 _numEpochs
+        uint256 _rewardsPerSecond,
+        uint256 _epochLength
     ) external;
 
     function updateMinimumDeposit(uint256 _minimum) external;
