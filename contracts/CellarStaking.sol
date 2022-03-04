@@ -916,8 +916,10 @@ contract CellarStaking is ICellarStaking, Ownable {
 
         for (uint256 i = 0; i < rewardEpochs.length; i++) {
             RewardEpoch memory e = rewardEpochs[i];
-            uint256 totalEpochRewards = e.rewardsPerSecond * e.duration;
-            amount += totalEpochRewards - e.rewardsEarned;
+            if (block.timestamp <= e.startTimestamp + e.duration) {
+                uint256 totalEpochRewards = e.rewardsPerSecond * e.duration;
+                amount += totalEpochRewards - e.rewardsEarned;
+            }
         }
 
         rewardsLeft = amount;
