@@ -423,10 +423,11 @@ contract CellarStaking is ICellarStaking, Ownable {
         updateTotalRewardAccounting
         updateUserRewardAccounting(msg.sender)
         updateRewardsLeft
-        returns (uint256[] memory rewards)
+        returns (uint256[] memory)
     {
         // Individually unstake each deposit
         uint256[] memory depositIds = allUserStakes[msg.sender];
+        uint256[] memory rewards = new uint256[](depositIds.length);
 
         for (uint256 i = 0; i < depositIds.length; i++) {
             UserStake storage s = stakes[msg.sender][depositIds[i]];
@@ -435,6 +436,8 @@ contract CellarStaking is ICellarStaking, Ownable {
                 rewards[i] = _unstake(depositIds[i]);
             }
         }
+
+        return rewards;
     }
 
     /**
