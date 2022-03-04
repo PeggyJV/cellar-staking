@@ -62,10 +62,6 @@ describe("CellarStaking", () => {
     const tokenStakeUser = await tokenStake.connect(user);
     await tokenStakeUser.increaseAllowance(staking.address, initialTokenAmount);
 
-    // test chain starts at block.timestamp 0, must increase it to pass startTimestamp checks
-    startTimestamp = Math.floor(Date.now() / 1000);
-    await setNextBlockTimestamp(startTimestamp);
-
     const connectUser = async (signer: SignerWithAddress): Promise<CellarStaking> => {
       const stake = await tokenStake.connect(signer);
       await stake.mint(signer.address, initialTokenAmount);
@@ -115,7 +111,7 @@ describe("CellarStaking", () => {
 
       it("should not allow a user to stake if there are no rewards left", async () => {
         const { stakingUser } = ctx;
-        await increaseTime(oneDaySec + 15); // epoch has not completed
+        await increaseTime(oneDaySec * 2); // epoch has not completed
 
         await expect(stakingUser.stake(1, lockDay)).to.be.revertedWith("STATE_NoRewardsLeft");
       });
@@ -404,7 +400,7 @@ describe("CellarStaking", () => {
         beforeEach(async () => {
           await ctx.staking.initializePool(1, oneWeekSec);
           await ctx.staking.replenishPool(1, oneWeekSec);
-          console.log("TEST: stake 1000");
+
           await ctx.stakingUser.stake(stakeAmount, lockDay);
         });
 
@@ -421,19 +417,14 @@ describe("CellarStaking", () => {
         it("should require a non-zero amount to unstake", async () => {
           const { stakingUser, user, tokenDist } = ctx;
 
-          console.log("TEST: roll to next epoch");
           await rollNextEpoch(stakingUser);
-          console.log("TEST: unbond");
           await stakingUser.unbond(0);
 
           const prevBal = await tokenDist.balanceOf(user.address);
-          console.log("TEST: tokenDist prevBal", prevBal.toNumber());
 
           const stake = await stakingUser.stakes(user.address, 0);
-          console.log("TEST: roll forward to unbond timestamp");
           await setNextBlockTimestamp(stake.unbondTimestamp.toNumber() + 1);
 
-          console.log("TEST: unstake");
           await stakingUser.unstake(0);
 
           // single staker takes all rewards
@@ -465,7 +456,6 @@ describe("CellarStaking", () => {
     });
 
     describe("unstakeAll", () => {
-      //const rewardPerEpoch = 2000000; // 2M
       const rewardPerEpoch = 2000000; // 2M
       const stakeAmount = 50000;
 
@@ -476,7 +466,7 @@ describe("CellarStaking", () => {
         await ctx.stakingUser.stake(stakeAmount, lockDay);
       });
 
-      it.only("should unstake all amounts for all deposits, and distribute all available rewards", async () => {
+      it("should unstake all amounts for all deposits, and distribute all available rewards", async () => {
         const { connectUser, signers, stakingUser, user, tokenDist, tokenStake } = ctx;
         const user2 = signers[2];
         const stakingUser2 = await connectUser(user2);
@@ -485,28 +475,28 @@ describe("CellarStaking", () => {
         await rollNextEpoch(stakingUser);
 
         // epoch 2 reward should be split 2/3 to 1/3
-        // await stakingUser2.stake(stakeAmount, lockDay);
+        await stakingUser2.stake(stakeAmount, lockDay);
         await stakingUser.stake(stakeAmount, lockDay);
-        //
-        // await rollNextEpoch(stakingUser);
-        // await stakingUser.unbondAll();
-        //
-        // const prevStakeBal = await tokenStake.balanceOf(user.address);
-        // const prevDistBal = await tokenDist.balanceOf(user.address);
-        //
-        // const stake = await stakingUser.stakes(user.address, 0);
-        // await setNextBlockTimestamp(stake.unbondTimestamp.toNumber() + 1);
-        // await stakingUser.unstakeAll();
-        //
-        // // expect to recover balance that was initially staked
-        // const totalStaked = stakeAmount + stakeAmount;
-        // const stakeBal = await tokenStake.balanceOf(user.address);
-        // expect(prevStakeBal.add(BigNumber.from(totalStaked))).to.equal(stakeBal);
-        //
-        // // expect to collect all rewards of first epoch and 2/3 of 2nd epoch
-        // const expectedRewards = rewardPerEpoch + Math.floor((rewardPerEpoch * 2) / 3);
-        // const distBal = await tokenDist.balanceOf(user.address);
-        // expect(distBal.sub(prevDistBal)).to.equal(expectedRewards);
+
+        await rollNextEpoch(stakingUser);
+        await stakingUser.unbondAll();
+
+        const prevStakeBal = await tokenStake.balanceOf(user.address);
+        const prevDistBal = await tokenDist.balanceOf(user.address);
+
+        const stake = await stakingUser.stakes(user.address, 0);
+        await setNextBlockTimestamp(stake.unbondTimestamp.toNumber() + 1);
+        await stakingUser.unstakeAll();
+
+        // expect to recover balance that was initially staked
+        const totalStaked = stakeAmount + stakeAmount;
+        const stakeBal = await tokenStake.balanceOf(user.address);
+        expect(prevStakeBal.add(BigNumber.from(totalStaked))).to.equal(stakeBal);
+
+        // expect to collect all rewards of first epoch and 2/3 of 2nd epoch
+        const expectedRewards = rewardPerEpoch + Math.floor((rewardPerEpoch * 2) / 3);
+        const distBal = await tokenDist.balanceOf(user.address);
+        expect(distBal.sub(prevDistBal)).to.equal(expectedRewards);
       });
     });
 
@@ -523,7 +513,6 @@ describe("CellarStaking", () => {
         beforeEach(async () => {
           await ctx.staking.initializePool(1, oneWeekSec);
           await ctx.staking.replenishPool(1, oneWeekSec);
-          console.log("TEST: stake 1000");
           await ctx.stakingUser.stake(stakeAmount, lockDay);
         });
 
@@ -537,80 +526,127 @@ describe("CellarStaking", () => {
         it("should not redistribute rewards tha have already been claimed");
       });
     });
-    //
-    //   describe("claimAll", () => {
-    //     it("should claim all available rewards for all deposits, within the same epoch");
-    //     it("should claim all available rewards for all deposits, across multiple epochs");
-    //   });
-    //
-    //   describe("emergencyUnstake", () => {
-    //     it("should revert if the staking program has not been ended");
-    //     it("should return all staked tokens, across multiple stakes, regardless of lock status");
-    //   });
-    //
-    //   describe("emergencyClaim", () => {
-    //     it("should revert if the staking program has not been ended");
-    //     it("should return all staked tokens and distribute all unclaimed rewards");
-    //   });
-    // });
-    //
-    // describe("Admin Operations", () => {
-    //   describe("initializePool", () => {
-    //     it("should revert if caller is not the owner");
-    //     it("should revert if the contract is paused");
-    //     it("should revert if the staking pool has previously been initialized");
-    //     it("should revert if the number of epochs is 0");
-    //     it("should revert if the number of epochs is more than the maximum");
-    //     it("should revert if the epoch length is 0");
-    //     it("should revert if the rewards per epoch is 0");
-    //     it("should revert if the owner cannot fund the reward epochs");
-    //     it("should create new reward epochs and store them in contract state");
-    //   });
-    //
-    //   describe("replenishPool", () => {
-    //     it("should revert if caller is not the owner");
-    //     it("should revert if the contract is paused");
-    //     it("should revert if the staking pool has not previously been initialized");
-    //     it("should revert if the number of new epochs is 0");
-    //     it("should revert if the number of new epochs plus previous epochs is more than the maximum");
-    //     it("should revert if the epoch length is 0");
-    //     it("should revert if the rewards per epoch is 0");
-    //     it("should revert if the owner cannot fund the new reward epochs");
-    //     it("should create new reward epochs and store them in contract state, appending to existing state");
-    //   });
-    //
-    //   describe("updateMinimumDeposit", () => {
-    //     it("should revert if caller is not the owner");
-    //     it("should set a new minimum staking deposit and immediately enforce it");
-    //   });
-    //
-    //   describe("setPaused", () => {
-    //     it("should revert if caller is not the owner");
-    //     it("should pause the contract");
-    //     it("should unpause the contract");
-    //   });
-    //
-    //   describe("emergencyStop", () => {
-    //     it("should revert if caller is not the owner");
-    //     it("should end the contract while making rewards claimable");
-    //     it("should end the contract and return distribution tokens if rewards are not claimable");
-    //     it("should revert if called more than once");
-    //   });
-    // });
-    //
-    // describe("State Information", () => {
-    //   describe("currentEpoch", () => {
-    //     it("should report the correct epoch for the current time");
-    //     it("should revert if there is no active epoch");
-    //   });
-    //
-    //   describe("epochAtTime", () => {
-    //     it("should report the correct epoch for the specified time");
-    //     it("should revert if there is no active epoch at the time specified");
-    //   });
-    //
-    //   describe("totalRewards", () => {
-    //     it("should report the total rewards scheduled across all epochs");
-    //   });
+
+    describe("claimAll", () => {
+      it("should claim all available rewards for all deposits, within the same epoch");
+      it("should claim all available rewards for all deposits, across multiple epochs");
+    });
+
+    describe("emergencyUnstake", () => {
+      beforeEach(async () => {
+        await ctx.staking.initializePool(1, oneWeekSec);
+      });
+
+      it("should revert if the staking program has not been ended", async () => {
+        const { stakingUser } = ctx;
+
+        await expect(stakingUser.emergencyUnstake()).to.be.revertedWith("STATE_NoEmergencyUnstake");
+      });
+
+      it("should return all staked tokens, across multiple stakes, regardless of lock status", async () => {
+        const { connectUser, signers, staking, stakingUser, tokenStake, user } = ctx;
+        await stakingUser.stake(initialTokenAmount, lockDay);
+        expect(await tokenStake.balanceOf(user.address)).to.equal(0);
+
+        const user2 = signers[2];
+        const stakingUser2 = await connectUser(user2);
+        await stakingUser2.stake(initialTokenAmount, lockWeek);
+        expect(await tokenStake.balanceOf(user2.address)).to.equal(0);
+
+        const user3 = signers[3];
+        const stakingUser3 = await connectUser(user3);
+        await stakingUser3.stake(initialTokenAmount, lockTwoWeeks);
+        expect(await tokenStake.balanceOf(user3.address)).to.equal(0);
+
+        await staking.emergencyStop(false);
+        await stakingUser.emergencyUnstake();
+        expect(await tokenStake.balanceOf(user.address)).to.equal(initialTokenAmount);
+
+        await stakingUser2.emergencyUnstake();
+        expect(await tokenStake.balanceOf(user2.address)).to.equal(initialTokenAmount);
+
+        await stakingUser3.emergencyUnstake();
+        expect(await tokenStake.balanceOf(user3.address)).to.equal(initialTokenAmount);
+      });
+
+      it("should allow rewards to be claimable");
+    });
+
+    describe("emergencyClaim", () => {
+      it("should revert if the staking program has not been ended", async () => {
+        const { stakingUser } = ctx;
+
+        await expect(stakingUser.emergencyClaim()).to.be.revertedWith("STATE_NoEmergencyUnstake");
+      });
+
+      it("should revert if the contract stopped with claim disabled", async () => {
+        const { staking, stakingUser } = ctx;
+
+        await staking.emergencyStop(false);
+        await expect(stakingUser.emergencyClaim()).to.be.revertedWith("STATE_NoEmergencyClaim");
+      });
+
+      it("should return all staked tokens and distribute all unclaimed rewards");
+    });
   });
+
+  // describe("Admin Operations", () => {
+  //   describe("initializePool", () => {
+  //     it("should revert if caller is not the owner");
+  //     it("should revert if the contract is paused");
+  //     it("should revert if the staking pool has previously been initialized");
+  //     it("should revert if the number of epochs is 0");
+  //     it("should revert if the number of epochs is more than the maximum");
+  //     it("should revert if the epoch length is 0");
+  //     it("should revert if the rewards per epoch is 0");
+  //     it("should revert if the owner cannot fund the reward epochs");
+  //     it("should create new reward epochs and store them in contract state");
+  //   });
+  //
+  //   describe("replenishPool", () => {
+  //     it("should revert if caller is not the owner");
+  //     it("should revert if the contract is paused");
+  //     it("should revert if the staking pool has not previously been initialized");
+  //     it("should revert if the number of new epochs is 0");
+  //     it("should revert if the number of new epochs plus previous epochs is more than the maximum");
+  //     it("should revert if the epoch length is 0");
+  //     it("should revert if the rewards per epoch is 0");
+  //     it("should revert if the owner cannot fund the new reward epochs");
+  //     it("should create new reward epochs and store them in contract state, appending to existing state");
+  //   });
+  //
+  //   describe("updateMinimumDeposit", () => {
+  //     it("should revert if caller is not the owner");
+  //     it("should set a new minimum staking deposit and immediately enforce it");
+  //   });
+  //
+  //   describe("setPaused", () => {
+  //     it("should revert if caller is not the owner");
+  //     it("should pause the contract");
+  //     it("should unpause the contract");
+  //   });
+  //
+  //   describe("emergencyStop", () => {
+  //     it("should revert if caller is not the owner");
+  //     it("should end the contract while making rewards claimable");
+  //     it("should end the contract and return distribution tokens if rewards are not claimable");
+  //     it("should revert if called more than once");
+  //   });
+  // });
+  //
+  // describe("State Information", () => {
+  //   describe("currentEpoch", () => {
+  //     it("should report the correct epoch for the current time");
+  //     it("should revert if there is no active epoch");
+  //   });
+  //
+  //   describe("epochAtTime", () => {
+  //     it("should report the correct epoch for the specified time");
+  //     it("should revert if there is no active epoch at the time specified");
+  //   });
+  //
+  //   describe("totalRewards", () => {
+  //     it("should report the total rewards scheduled across all epochs");
+  //   });
+  //   });
 });
