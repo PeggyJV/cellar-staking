@@ -23,12 +23,11 @@ interface TestContext {
 
 const oneDaySec = 60 * 60 * 24;
 const oneWeekSec = oneDaySec * 7;
-const hundred = BigNumber.from(100);
+const ether = ethers.utils.parseEther;
 
 describe("CellarStaking", () => {
   let ctx: TestContext;
-  const initialTokenAmount = 20000000; // 20M
-  const initialBN = BigNumber.from(initialTokenAmount);
+  const initialTokenAmount = ether("20000000"); // 20M
   let startTimestamp: number;
 
   // Lock enum
@@ -92,7 +91,7 @@ describe("CellarStaking", () => {
       it("should not allow staking if the rewards are not initialized", async () => {
         const { stakingUser } = ctx;
 
-        await expect(stakingUser.stake(1000, lockDay)).to.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.stake(ether("1000"), lockDay)).to.be.revertedWith("STATE_ContractPaused");
       });
     });
 
@@ -103,17 +102,17 @@ describe("CellarStaking", () => {
 
       it("should not allow a user to stake if the stake is under the minimum", async () => {
         const { staking, stakingUser } = ctx;
-        const min = 100;
+        const min = ether("100");
         await staking.updateMinimumDeposit(min);
 
-        await expect(stakingUser.stake(min - 1, lockDay)).to.be.revertedWith("USR_MinimumDeposit");
+        await expect(stakingUser.stake(min.sub(ether("1")), lockDay)).to.be.revertedWith("USR_MinimumDeposit");
       });
 
       it("should not allow a user to stake if there are no rewards left", async () => {
         const { stakingUser } = ctx;
         await increaseTime(oneDaySec * 2); // epoch has not completed
 
-        await expect(stakingUser.stake(1, lockDay)).to.be.revertedWith("STATE_NoRewardsLeft");
+        await expect(stakingUser.stake(ether("1"), lockDay)).to.be.revertedWith("STATE_NoRewardsLeft");
       });
 
       it("should not allow a user to stake if the amount is zero", async () => {
@@ -126,17 +125,17 @@ describe("CellarStaking", () => {
 
         const user2 = signers[2];
         const stakingUser2 = await connectUser(user2);
-        await stakingUser2.stake(1, lockTwoWeeks);
+        await stakingUser2.stake(ether("100"), lockTwoWeeks);
 
-        await stakingUser.stake(initialTokenAmount, lockWeek);
-        await stakingUser2.stake(1, lockTwoWeeks);
+        await stakingUser.stake(initialTokenAmount.div(2), lockWeek);
+        await stakingUser2.stake(ether("100"), lockTwoWeeks);
 
-        //await expect(stakingUser.stake(0, lockDay)).to.be.revertedWith("USR_StakeTooSmall");
+        await expect(stakingUser.stake(1, lockDay)).to.be.revertedWith("USR_StakeTooSmall");
       });
 
       it("should revert for an invalid lock value", async () => {
         const { stakingUser } = ctx;
-        await expect(stakingUser.stake(1, 99)).to.be.revertedWith("function was called with incorrect parameter");
+        await expect(stakingUser.stake(ether("1"), 99)).to.be.revertedWith("function was called with incorrect parameter");
       });
 
       it("should allow one user to stake with 100% proportional share", async () => {
@@ -204,7 +203,7 @@ describe("CellarStaking", () => {
         expect(stakes2.shares.toNumber()).to.equal(totalShares.toNumber() * y);
       });
 
-      it.skip("should correctly calculate stake shares for two users", async () => {
+      it("should correctly calculate stake shares for two users", async () => {
         // number of runs
         const times = 10;
 
@@ -216,9 +215,9 @@ describe("CellarStaking", () => {
           // javascript floating point arithmetic is imprecise
           // user1 stakes x (x is a range 50-100 inclusive)
           // user2 stakes 100 - x
-          const x = BigNumber.from(rand(50, 99));
-          const amount1 = initialBN.mul(x).div(hundred).toNumber();
-          const amount2 = initialTokenAmount - amount1;
+          const x = rand(50, 99);
+          const amount1 = initialTokenAmount.div(100).mul(x);
+          const amount2 = initialTokenAmount.sub(amount1);
 
           await stakingUser.stake(amount1, lockDay);
 
@@ -230,14 +229,14 @@ describe("CellarStaking", () => {
           const shares2 = (await stakingUser.stakes(user2.address, 0)).shares;
           const totalShares = await stakingUser.totalShares();
 
-          const expected1 = shares1.mul(initialBN).div(totalShares).toNumber();
-          const expected2 = shares2.mul(initialBN).div(totalShares).toNumber();
+          const expected1 = shares1.mul(initialTokenAmount).div(totalShares);
+          const expected2 = shares2.mul(initialTokenAmount).div(totalShares);
           expect(expected1).to.equal(amount1);
           expect(expected2).to.equal(amount2);
         }
       });
 
-      it.skip("fuzzing with random number of users and staked amounts", async () => {
+      it("fuzzing with random number of users and staked amounts", async () => {
         // global fuzzing parameters
         const times = 1;
         const minStake = 100; //100000
@@ -252,13 +251,13 @@ describe("CellarStaking", () => {
           // setup fuzzing scenario
           const numUsers = rand(2, 19); // Max signers = 10 because 0 is admin
           const signers = <SignerWithAddress[]>[...Array(numUsers).keys()].map(i => ctx.signers[i + 1]);
-          const amounts = new Map<SignerWithAddress, number>();
+          const amounts = new Map<SignerWithAddress, BigNumber>();
           let totalStaked = BigNumber.from(0);
 
           // stake a random amount for each signer
           for (const signer of signers) {
             const staking = await connectUser(signer);
-            const amount = rand(minStake, maxStake); // inclusive
+            const amount = ethers.utils.parseEther(rand(minStake, maxStake).toString()); // inclusive
             await staking.stake(amount, lockDay);
 
             amounts.set(signer, amount);
@@ -266,19 +265,13 @@ describe("CellarStaking", () => {
           }
 
           const totalShares = await ctx.staking.totalShares();
-          console.log(`Number of users: ${numUsers}`);
-          console.log(`Total amount staked: ${totalStaked.toNumber()}`);
-          console.log(`totalShares: ${totalShares.toNumber()}`);
 
           for (const signer of signers) {
             const amount = amounts.get(signer);
-            console.log(`User ${signer.address} staked: ${amount}`);
-
             const share = (await ctx.staking.stakes(signer.address, 0)).shares;
-            console.log(`User ${signer.address} shares: ${share}`);
 
             // shares * totalStaked / totalShares = stakedAmount
-            const expected = share.mul(totalStaked).div(totalShares).toNumber();
+            const expected = share.mul(totalStaked).div(totalShares);
             expect(expected).to.equal(amount);
           }
         }
