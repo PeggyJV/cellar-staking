@@ -387,8 +387,7 @@ describe("CellarStaking", () => {
 
       describe("initialized", () => {
         const rewardPerEpoch = oneWeekSec;
-        const stakeAmount = 1000;
-        const stakeAmountBN = BigNumber.from(stakeAmount);
+        const stakeAmount = ether("1000");
 
         beforeEach(async () => {
           await ctx.staking.initializePool(1, oneWeekSec);
@@ -399,7 +398,7 @@ describe("CellarStaking", () => {
 
         it("should revert if passed an out of bounds deposit id", async () => {
           const { stakingUser } = ctx;
-          await expect(stakingUser.unstake(99)).to.be.revertedWith("USR_NoDeposit");
+          await expect(stakingUser.unstake(2)).to.be.revertedWith("USR_NoDeposit");
         });
 
         it("should not allow unstaking a stake that is still locked", async () => {
@@ -422,7 +421,7 @@ describe("CellarStaking", () => {
 
           // single staker takes all rewards
           const bal = await tokenDist.balanceOf(user.address);
-          expect(bal.sub(prevBal).toNumber()).to.equal(rewardPerEpoch);
+          expect(bal.sub(prevBal)).to.equal(rewardPerEpoch);
         });
 
         it("should not unstake more than the deposited amount", async () => {
@@ -440,7 +439,7 @@ describe("CellarStaking", () => {
 
           // previous bal + staked amount should equal current balance
           const bal = await tokenStake.balanceOf(user.address);
-          expect(prevBal.add(stakeAmountBN).toNumber()).to.equal(bal.toNumber());
+          expect(prevBal.add(stakeAmount)).to.equal(bal);
         });
 
         it("should not allow a user to unstake an amount smaller than the unit share size"); // @kvk does this test make sense still?

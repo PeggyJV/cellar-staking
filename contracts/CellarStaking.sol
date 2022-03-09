@@ -620,6 +620,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         // Mark starting point for rewards accounting
         paused = false;
         startTimestamp = block.timestamp;
+        endTimestamp = startTimestamp + _epochLength;
         lastAccountingTimestamp = startTimestamp;
 
         _addReward(_rewardsPerSecond, _epochLength, startTimestamp);
@@ -642,6 +643,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         if (lastEpoch.startTimestamp == 0) revert ACCT_NoPreviousEpoch();
 
         uint256 nextStartTimestamp = lastEpoch.startTimestamp + lastEpoch.duration;
+        endTimestamp = nextStartTimestamp + _epochLength;
 
         _addReward(_rewardsPerSecond, _epochLength, nextStartTimestamp);
     }
