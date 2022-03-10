@@ -10,9 +10,7 @@ import "./interfaces/ICellarStaking.sol";
 import "hardhat/console.sol";
 
 // TODO:
-// Fix code
 // Fix tests
-// Rm irrelevant errors
 // Fix docs
 
 /**
@@ -153,6 +151,7 @@ contract CellarStaking is ICellarStaking, Ownable {
     /// @notice user => depositId[]
     mapping(address => uint256[]) public allUserStakes;
     /// @notice user => depositId => index in allUserStakes
+    // TODO: try to remove this
     mapping(address => mapping(uint256 => uint256)) public depositIdIdx;
     /// @notice user => current index of user deposit array
     mapping(address => uint256) public currentUserDepositIdx;
@@ -618,8 +617,7 @@ contract CellarStaking is ICellarStaking, Ownable {
 
     /**
      * @notice Specify a minimum deposit for staking.
-     * @dev    Can only be called by owner. Should be used if shares get large
-     *         enough that USR_StakeTooSmall commonly triggers.
+     * @dev    Can only be called by owner.
      *
      * @param _minimum              The minimum deposit for each new stake.
      */
@@ -790,8 +788,6 @@ contract CellarStaking is ICellarStaking, Ownable {
 
     /**
      * @dev Update reward accounting for the global state totals.
-     * TODO: Add more here
-     *
      */
     modifier updateRewards() {
         rewardPerTokenStored = rewardPerToken();

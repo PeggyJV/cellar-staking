@@ -19,19 +19,6 @@ pragma solidity >=0.8.4;
 error USR_MinimumDeposit(uint256 amount, uint256 minimumDeposit);
 
 /**
- * @notice Amount user attempted to stake is equivalent to zero staking shares after division.
- * @dev    If this occurs, the admin should look at increasing the minimum deposit size.
- *
- * @param amount                The amount of tokens the user attmpted to stake.
- */
-error USR_StakeTooSmall(uint256 amount);
-
-/**
- * @notice The user attempted to unstake 0 tokens.
- */
-error USR_ZeroUnstake();
-
-/**
  * @notice The specified deposit ID does not exist for the caller.
  *
  * @param depositId             The deposit ID provided for lookup.
@@ -58,13 +45,6 @@ error USR_AlreadyUnbonding(uint256 depositId);
  * @param depositId             The deposit ID the user attempted to unstake.
  */
 error USR_StakeLocked(uint256 depositId);
-
-/**
- * @notice The user is attempting to unstake an amount which is equivalent to zero staking shares.
- *
- * @param amount                The amount of tokens the user attempted to unstake.
- */
-error USR_UnstakeTooSmall(uint256 amount);
 
 /**
  * @notice The contract owner attempted to update rewards but the new reward rate would cause overflow.
