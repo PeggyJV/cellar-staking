@@ -443,13 +443,33 @@ describe("CellarStaking", () => {
         });
 
         it("should not allow a user to unstake an amount smaller than the unit share size"); // @kvk does this test make sense still?
-        it("should unstake, distributing both the specified deposit amount and any accumulated rewards");
+
+        it("should unstake, distributing both the specified deposit amount and any accumulated rewards", async () => {
+          const { stakingUser, user, tokenStake, tokenDist } = ctx;
+
+          await rollNextEpoch(stakingUser);
+          await stakingUser.unbond(0);
+
+          const prevBal = await tokenStake.balanceOf(user.address);
+
+          const stake = await stakingUser.stakes(user.address, 0);
+          await setNextBlockTimestamp(stake.unbondTimestamp.toNumber() + 1);
+
+          await stakingUser.unstake(0);
+
+          // previous bal + staked amount should equal current balance
+          const bal = await tokenStake.balanceOf(user.address);
+          expect(prevBal.add(stakeAmount)).to.equal(bal);
+
+          const rewardsBal = await tokenDist.balanceOf(user.address);
+          expect(rewardsBal).to.equal(rewardPerEpoch);
+        });
       });
     });
 
-    describe("unstakeAll", () => {
-      const rewardPerEpoch = 2000000; // 2M
-      const stakeAmount = 50000;
+    describe.only("unstakeAll", () => {
+      const rewardPerEpoch = 2_000_000; // 2M
+      const stakeAmount = ether("50000");
 
       beforeEach(async () => {
         await ctx.staking.initializePool(1, oneWeekSec);
@@ -478,10 +498,12 @@ describe("CellarStaking", () => {
 
         const stake = await stakingUser.stakes(user.address, 0);
         await setNextBlockTimestamp(stake.unbondTimestamp.toNumber() + 1);
+        console.log('GONNA UNSTAKE ALL');
         await stakingUser.unstakeAll();
+        console.log('DID IT');
 
         // expect to recover balance that was initially staked
-        const totalStaked = stakeAmount + stakeAmount;
+        const totalStaked = stakeAmount.add(stakeAmount);
         const stakeBal = await tokenStake.balanceOf(user.address);
         expect(prevStakeBal.add(BigNumber.from(totalStaked))).to.equal(stakeBal);
 

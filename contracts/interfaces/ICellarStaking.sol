@@ -19,6 +19,9 @@ interface ICellarStaking {
     event Unstake(address indexed user, uint256 depositId, uint256 amount);
     event Claim(address indexed user, uint256 depositId, uint256 amount);
     event EmergencyStop(address owner, bool claimable);
+    event EmergencyUnstake(address indexed user, uint256 depositId, uint256 amount);
+    event EmergencyClaim(address indexed user, uint256 amount);
+    event EpochDurationChange(uint256 duration);
 
     // ===================== Structs ======================
 
@@ -28,24 +31,12 @@ interface ICellarStaking {
         twoWeeks
     }
 
-    struct RewardEpoch {
-        uint256 startTimestamp;
-        uint256 duration;
-        uint256 rewardsPerSecond;
-        uint256 rewardsEarned;
-        uint256 shareSecondsAccumulated;
-    }
-
     struct UserStake {
         uint256 amount;
         uint256 amountWithBoost;
-        uint256 shares;
-        uint256 shareSecondsAccumulated;
-        uint256 currentEpochRewards;
-        uint256 totalRewardsEarned;
-        uint256 rewardsClaimed;
+        uint256 rewardPerTokenPaid;
+        uint256 rewards;
         uint256 unbondTimestamp;
-        uint256 depositTimestamp;
         Lock lock;
     }
 
@@ -55,9 +46,9 @@ interface ICellarStaking {
 
     function distributionToken() external returns (ERC20);
 
-    function minimumDeposit() external returns (uint256);
+    function epochDuration() external returns (uint256);
 
-    function startTimestamp() external returns (uint256);
+    function minimumDeposit() external returns (uint256);
 
     function endTimestamp() external returns (uint256);
 
@@ -65,13 +56,9 @@ interface ICellarStaking {
 
     function totalDepositsWithBoost() external returns (uint256);
 
-    function totalShares() external returns (uint256);
+    function rewardRate() external returns (uint256);
 
-    function totalShareSeconds() external returns (uint256);
-
-    function rewardsLeft() external returns (uint256);
-
-    function maxNumEpochs() external returns (uint256);
+    function rewardPerTokenStored() external returns (uint256);
 
     function paused() external returns (bool);
 
@@ -105,15 +92,11 @@ interface ICellarStaking {
 
     // ================ Admin Functions ================
 
-    function initializePool(
-        uint256 _rewardsPerSecond,
-        uint256 _epochLength
-    ) external;
+    function notifyRewardAmount(uint256 reward) external;
 
-    function replenishPool(
-        uint256 _rewardsPerSecond,
-        uint256 _epochLength
-    ) external;
+    function setRewardsDuration(uint256 _epochDuration) external;
+
+    function setRewardsDistribution(address _rewardsDistribution) external;
 
     function updateMinimumDeposit(uint256 _minimum) external;
 
@@ -123,11 +106,13 @@ interface ICellarStaking {
 
     // ================ View Functions ================
 
-    function currentEpoch() external view returns (uint256);
+    function latestRewardsTimestamp() external view returns (uint256);
 
-    function epochAtTime(uint256 timestamp) external view returns (uint256 epochIdx);
+    function rewardPerToken() external view returns (uint256);
 
-    function totalRewards() external view returns (uint256 amount);
+    function pendingRewards(address user, uint256 depositId) external view returns (uint256 reward);
+
+    function pendingRewardsAll(address user) external view returns (uint256 reward);
 
     function getUserStake(address user, uint256 depositId) external returns (UserStake memory);
 
@@ -136,6 +121,4 @@ interface ICellarStaking {
     function getDepositIdIdx(address user, uint256 depositId) external returns (uint256);
 
     function getCurrentUserDepositIdx(address user) external returns (uint256);
-
-    function getRewardEpoch(uint256 idx) external returns (RewardEpoch memory);
 }
