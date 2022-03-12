@@ -196,6 +196,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         whenNotPaused
         updateRewards
     {
+        if (amount == 0) revert USR_ZeroDeposit();
         if (amount < minimumDeposit) revert USR_MinimumDeposit(amount, minimumDeposit);
         if (block.timestamp > endTimestamp) revert STATE_NoRewardsLeft();
 
@@ -211,7 +212,7 @@ contract CellarStaking is ICellarStaking, Ownable {
 
         s.amount = amount;
         s.amountWithBoost = amountWithBoost;
-        s.rewardPerTokenPaid = 0;
+        s.rewardPerTokenPaid = rewardPerTokenStored;
         s.rewards = 0;
         s.unbondTimestamp = 0;
         s.lock = lock;
@@ -238,7 +239,6 @@ contract CellarStaking is ICellarStaking, Ownable {
         whenNotPaused
         updateRewards
     {
-        _updateRewardForStake(msg.sender, depositId);
         _unbond(depositId);
     }
 
@@ -257,8 +257,6 @@ contract CellarStaking is ICellarStaking, Ownable {
         uint256[] memory depositIds = allUserStakes[msg.sender];
 
         for (uint256 i = 0; i < depositIds.length; i++) {
-            _updateRewardForStake(msg.sender, depositIds[i]);
-
             UserStake storage s = stakes[msg.sender][depositIds[i]];
 
             if (s.unbondTimestamp == 0) {
@@ -281,6 +279,8 @@ contract CellarStaking is ICellarStaking, Ownable {
         uint256 depositAmount = s.amount;
         if (depositAmount == 0) revert USR_NoDeposit(depositId);
         if (s.unbondTimestamp > 0) revert USR_AlreadyUnbonding(depositId);
+
+        _updateRewardForStake(msg.sender, depositId);
 
         // Remove any lock boosts
         uint256 depositAmountReduced = s.amountWithBoost - depositAmount;
@@ -307,7 +307,6 @@ contract CellarStaking is ICellarStaking, Ownable {
         whenNotPaused
         updateRewards
     {
-        _updateRewardForStake(msg.sender, depositId);
         _cancelUnbonding(depositId);
     }
 
@@ -326,7 +325,6 @@ contract CellarStaking is ICellarStaking, Ownable {
         uint256[] memory depositIds = allUserStakes[msg.sender];
 
         for (uint256 i = 0; i < depositIds.length; i++) {
-            _updateRewardForStake(msg.sender, depositIds[i]);
             UserStake storage s = stakes[msg.sender][depositIds[i]];
 
             if (s.unbondTimestamp > 0) {
@@ -349,6 +347,8 @@ contract CellarStaking is ICellarStaking, Ownable {
         uint256 depositAmount = s.amount;
         if (depositAmount == 0) revert USR_NoDeposit(depositId);
         if (s.unbondTimestamp == 0) revert USR_NotUnbonding(depositId);
+
+        _updateRewardForStake(msg.sender, depositId);
 
         // Reinstate
         (uint256 boost, ) = _getBoost(s.lock);
@@ -379,7 +379,6 @@ contract CellarStaking is ICellarStaking, Ownable {
         updateRewards
         returns (uint256 reward)
     {
-        _updateRewardForStake(msg.sender, depositId);
         return _unstake(depositId);
     }
 
@@ -402,8 +401,6 @@ contract CellarStaking is ICellarStaking, Ownable {
         uint256[] memory rewards = new uint256[](depositIds.length);
 
         for (uint256 i = 0; i < depositIds.length; i++) {
-            _updateRewardForStake(msg.sender, depositIds[i]);
-
             UserStake storage s = stakes[msg.sender][depositIds[i]];
 
             if (s.unbondTimestamp > 0 && block.timestamp >= s.unbondTimestamp) {
@@ -428,13 +425,19 @@ contract CellarStaking is ICellarStaking, Ownable {
         UserStake storage s = stakes[msg.sender][depositId];
 
         uint256 depositAmount = s.amount;
+
         if (depositAmount == 0) revert USR_NoDeposit(depositId);
         if (block.timestamp < s.unbondTimestamp || s.unbondTimestamp == 0) revert USR_StakeLocked(depositId);
 
+        _updateRewardForStake(msg.sender, depositId);
+
         // Start unstaking
         uint256 amountWithBoost = s.amountWithBoost;
+        reward = s.rewards;
+
         s.amount = 0;
         s.amountWithBoost = 0;
+        s.rewards = 0;
 
         // Update global state
         totalDeposits -= depositAmount;
@@ -443,10 +446,10 @@ contract CellarStaking is ICellarStaking, Ownable {
         // Distribute stake
         stakingToken.safeTransfer(msg.sender, depositAmount);
 
-        // Distribute rewards via claim
-        reward = _claim(depositId);
+        // Distribute reward
+        distributionToken.safeTransfer(msg.sender, reward);
 
-        emit Unstake(msg.sender, depositId, depositAmount);
+        emit Unstake(msg.sender, depositId, depositAmount, reward);
     }
 
     /**
@@ -464,7 +467,6 @@ contract CellarStaking is ICellarStaking, Ownable {
         updateRewards
         returns (uint256 reward)
     {
-        _updateRewardForStake(msg.sender, depositId);
         return _claim(depositId);
     }
 
@@ -489,8 +491,6 @@ contract CellarStaking is ICellarStaking, Ownable {
         rewards = new uint256[](depositIds.length);
 
         for (uint256 i = 0; i < depositIds.length; i++) {
-            _updateRewardForStake(msg.sender, depositIds[i]);
-
             rewards[i] = _claim(depositIds[i]);
         }
     }
@@ -510,8 +510,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         // Fetch stake and make sure it is valid
         UserStake storage s = stakes[msg.sender][depositId];
 
-        uint256 depositAmount = s.amount;
-        if (depositAmount == 0) revert USR_NoDeposit(depositId);
+        _updateRewardForStake(msg.sender, depositId);
 
         // Increment rewards
         reward = s.rewards;
@@ -596,7 +595,9 @@ contract CellarStaking is ICellarStaking, Ownable {
             revert USR_RewardTooLarge();
         }
 
-        // Claim rewards
+        endTimestamp = block.timestamp + epochDuration;
+
+        // Source rewards
         distributionToken.safeTransferFrom(rewardsDistribution, address(this), reward);
 
         emit Funding(address(stakingToken), address(distributionToken), reward);
@@ -813,7 +814,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         if (s.amount == 0) return;
 
         uint256 earned = _earned(s);
-        s.rewards = earned;
+        s.rewards += earned;
 
         s.rewardPerTokenPaid = rewardPerTokenStored;
     }
@@ -822,9 +823,9 @@ contract CellarStaking is ICellarStaking, Ownable {
      * @dev Return how many rewards a stake has earned and has claimable.
      */
     function _earned(UserStake memory s) internal view returns (uint256) {
-        uint256 rewardPerTokenAcc = rewardPerToken() - s.rewardPerTokenPaid;
-        uint256 newRewards = s.amountWithBoost * rewardPerTokenAcc / ONE;
-        return s.rewards + newRewards;
+        uint256 rewardPerTokenAcc = rewardPerTokenStored - s.rewardPerTokenPaid;
+        uint256 newRewards = s.amountWithBoost * (rewardPerTokenAcc / ONE);
+        return newRewards;
     }
 
     /**

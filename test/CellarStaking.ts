@@ -7,12 +7,11 @@ const { loadFixture } = waffle;
 
 import type { CellarStaking } from "../src/types/CellarStaking";
 import type { MockERC20 } from "../src/types/MockERC20";
-import { deploy, increaseTime, rand, setNextBlockTimestamp, rollNextEpoch } from "./utils";
+import { ether, deploy, increaseTime, rand, setNextBlockTimestamp, expectRoundedEqual } from "./utils";
 
 interface TestContext {
   admin: SignerWithAddress;
   connectUser: (signer: SignerWithAddress) => Promise<CellarStaking>;
-  maxEpochs: number;
   signers: SignerWithAddress[];
   staking: CellarStaking;
   stakingUser: CellarStaking;
@@ -23,7 +22,7 @@ interface TestContext {
 
 const oneDaySec = 60 * 60 * 24;
 const oneWeekSec = oneDaySec * 7;
-const ether = ethers.utils.parseEther;
+const oneMonthSec = oneDaySec * 30;
 
 describe("CellarStaking", () => {
   let ctx: TestContext;
@@ -49,8 +48,7 @@ describe("CellarStaking", () => {
     await tokenDist.mint(admin.address, initialTokenAmount);
 
     // Bootstrap CellarStaking contract
-    const maxEpochs = 3;
-    const params = [admin.address, tokenStake.address, tokenDist.address, maxEpochs];
+    const params = [admin.address, admin.address, tokenStake.address, tokenDist.address, oneMonthSec];
     const staking = <CellarStaking>await deploy("CellarStaking", admin, params);
     const stakingUser = await staking.connect(user);
 
@@ -72,7 +70,6 @@ describe("CellarStaking", () => {
     return {
       admin,
       connectUser,
-      maxEpochs,
       signers,
       staking,
       stakingUser,
@@ -87,17 +84,9 @@ describe("CellarStaking", () => {
   });
 
   describe("User Operations", () => {
-    describe("stake, uninitialized", () => {
-      it("should not allow staking if the rewards are not initialized", async () => {
-        const { stakingUser } = ctx;
-
-        await expect(stakingUser.stake(ether("1000"), lockDay)).to.be.revertedWith("STATE_ContractPaused");
-      });
-    });
-
     describe("stake, initialized to one wei per epoch sec", () => {
       beforeEach(async () => {
-        await ctx.staking.initializePool(1, oneDaySec);
+        await ctx.staking.notifyRewardAmount(oneMonthSec);
       });
 
       it("should not allow a user to stake if the stake is under the minimum", async () => {
@@ -110,27 +99,14 @@ describe("CellarStaking", () => {
 
       it("should not allow a user to stake if there are no rewards left", async () => {
         const { stakingUser } = ctx;
-        await increaseTime(oneDaySec * 2); // epoch has not completed
+        await increaseTime(oneMonthSec * 2); // epoch has not completed
 
         await expect(stakingUser.stake(ether("1"), lockDay)).to.be.revertedWith("STATE_NoRewardsLeft");
       });
 
       it("should not allow a user to stake if the amount is zero", async () => {
         const { stakingUser } = ctx;
-        await expect(stakingUser.stake(0, lockDay)).to.be.revertedWith("USR_StakeTooSmall");
-      });
-
-      it.skip("should not allow a user to stake if their stake is too small to receive a share", async () => {
-        const { connectUser, signers, stakingUser } = ctx;
-
-        const user2 = signers[2];
-        const stakingUser2 = await connectUser(user2);
-        await stakingUser2.stake(ether("100"), lockTwoWeeks);
-
-        await stakingUser.stake(initialTokenAmount.div(2), lockWeek);
-        await stakingUser2.stake(ether("100"), lockTwoWeeks);
-
-        await expect(stakingUser.stake(1, lockDay)).to.be.revertedWith("USR_StakeTooSmall");
+        await expect(stakingUser.stake(0, lockDay)).to.be.revertedWith("USR_ZeroDeposit");
       });
 
       it("should revert for an invalid lock value", async () => {
@@ -143,8 +119,8 @@ describe("CellarStaking", () => {
         await stakingUser.stake(100000, lockDay);
 
         const stakes = await stakingUser.stakes(user.address, 0);
-        const totalShares = await stakingUser.totalShares();
-        expect(stakes.shares.toNumber()).to.equal(totalShares.toNumber());
+        const totalDepositsWithBoost = await stakingUser.totalDepositsWithBoost();
+        expect(stakes.amountWithBoost).to.equal(totalDepositsWithBoost);
       });
 
       it("should allow two users to stake with an even proportional share", async () => {
@@ -158,9 +134,10 @@ describe("CellarStaking", () => {
 
         const stakes = await stakingUser.stakes(user.address, 0);
         const stakes2 = await stakingUser.stakes(user2.address, 0);
-        const totalShares = await stakingUser.totalShares();
-        expect(stakes.shares.toNumber()).to.equal(totalShares.toNumber() / 2);
-        expect(stakes.shares.toNumber()).to.equal(stakes2.shares.toNumber());
+
+        const totalDepositsWithBoost = await stakingUser.totalDepositsWithBoost();
+        expect(stakes.amountWithBoost).to.equal(totalDepositsWithBoost.div(2));
+        expect(stakes.amountWithBoost).to.equal(stakes2.amountWithBoost);
       });
 
       it("should allow three users to stake with an even proportional share", async () => {
@@ -179,10 +156,11 @@ describe("CellarStaking", () => {
         const stakes = await stakingUser.stakes(user.address, 0);
         const stakes2 = await stakingUser.stakes(user2.address, 0);
         const stakes3 = await stakingUser.stakes(user3.address, 0);
-        const totalShares = await stakingUser.totalShares();
-        expect(stakes.shares.toNumber()).to.equal(stakes2.shares.toNumber());
-        expect(stakes.shares.toNumber()).to.equal(stakes3.shares.toNumber());
-        expect(stakes.shares.toNumber()).to.equal(totalShares.toNumber() / 3);
+
+        const totalDepositsWithBoost = await stakingUser.totalDepositsWithBoost();
+        expect(stakes.amountWithBoost).to.equal(totalDepositsWithBoost.div(3));
+        expect(stakes.amountWithBoost).to.equal(stakes2.amountWithBoost);
+        expect(stakes.amountWithBoost).to.equal(stakes3.amountWithBoost);
       });
 
       it("should correctly calculate shares for a 60/40 stake between two users", async () => {
@@ -198,9 +176,9 @@ describe("CellarStaking", () => {
 
         const stakes = await stakingUser.stakes(user.address, 0);
         const stakes2 = await stakingUser.stakes(user2.address, 0);
-        const totalShares = await stakingUser.totalShares();
-        expect(stakes.shares.toNumber()).to.equal(totalShares.toNumber() * x);
-        expect(stakes2.shares.toNumber()).to.equal(totalShares.toNumber() * y);
+        const totalDepositsWithBoost = await stakingUser.totalDepositsWithBoost();
+        expect(stakes.amountWithBoost).to.equal(totalDepositsWithBoost.div(10).mul(x * 10));
+        expect(stakes2.amountWithBoost).to.equal(totalDepositsWithBoost.div(10).mul(y * 10));
       });
 
       it("should correctly calculate stake shares for two users", async () => {
@@ -209,7 +187,8 @@ describe("CellarStaking", () => {
 
         for (let i = 0; i < times; i++) {
           ctx = await loadFixture(fixture);
-          await ctx.staking.initializePool(1, oneDaySec);
+          await ctx.staking.setRewardsDuration(oneDaySec);
+          await ctx.staking.notifyRewardAmount(oneDaySec);
           const { connectUser, signers, stakingUser, user } = ctx;
 
           // javascript floating point arithmetic is imprecise
@@ -225,12 +204,12 @@ describe("CellarStaking", () => {
           const stakingUser2 = await connectUser(user2);
           await stakingUser2.stake(amount2, lockDay);
 
-          const shares1 = (await stakingUser.stakes(user.address, 0)).shares;
-          const shares2 = (await stakingUser.stakes(user2.address, 0)).shares;
-          const totalShares = await stakingUser.totalShares();
+          const stakes1 = (await stakingUser.stakes(user.address, 0)).amountWithBoost;
+          const stakes2 = (await stakingUser.stakes(user2.address, 0)).amountWithBoost;
+          const totalDepositsWithBoost = await stakingUser.totalDepositsWithBoost();
 
-          const expected1 = shares1.mul(initialTokenAmount).div(totalShares);
-          const expected2 = shares2.mul(initialTokenAmount).div(totalShares);
+          const expected1 = stakes1.mul(initialTokenAmount).div(totalDepositsWithBoost);
+          const expected2 = stakes2.mul(initialTokenAmount).div(totalDepositsWithBoost);
           expect(expected1).to.equal(amount1);
           expect(expected2).to.equal(amount2);
         }
@@ -245,7 +224,8 @@ describe("CellarStaking", () => {
         for (let i = 0; i < times; i++) {
           // reset fixture
           ctx = await loadFixture(fixture);
-          await ctx.staking.initializePool(1, oneDaySec);
+          await ctx.staking.setRewardsDuration(oneDaySec);
+          await ctx.staking.notifyRewardAmount(oneDaySec);
           const { connectUser } = ctx;
 
           // setup fuzzing scenario
@@ -264,14 +244,14 @@ describe("CellarStaking", () => {
             totalStaked = totalStaked.add(BigNumber.from(amount));
           }
 
-          const totalShares = await ctx.staking.totalShares();
+          const totalDepositsWithBoost = await ctx.staking.totalDepositsWithBoost();
 
           for (const signer of signers) {
             const amount = amounts.get(signer);
-            const share = (await ctx.staking.stakes(signer.address, 0)).shares;
+            const share = (await ctx.staking.stakes(signer.address, 0)).amountWithBoost;
 
             // shares * totalStaked / totalShares = stakedAmount
-            const expected = share.mul(totalStaked).div(totalShares);
+            const expected = share.mul(totalStaked).div(totalDepositsWithBoost);
             expect(expected).to.equal(amount);
           }
         }
@@ -287,27 +267,27 @@ describe("CellarStaking", () => {
         const stakes2 = await stakingUser2.stakes(user2.address, 0);
 
         const expected2 = 55;
-        let totalShares = await stakingUser.totalShares();
-        expect(stakes2.shares.toNumber()).to.equal(expected2);
-        expect(totalShares.toNumber()).to.equal(expected2);
+        let totalDepositsWithBoost = await stakingUser.totalDepositsWithBoost();
+        expect(stakes2.amountWithBoost).to.equal(expected2);
+        expect(totalDepositsWithBoost).to.equal(expected2);
 
         // user 1 stakes 100, should get 110 shares
         await stakingUser.stake(100, lockDay);
         const stakes = await stakingUser.stakes(signers[1].address, 0);
 
         const expected = 110;
-        totalShares = await stakingUser.totalShares();
-        expect(stakes.shares.toNumber()).to.equal(expected);
-        expect(totalShares.toNumber()).to.equal(expected + expected2);
+        totalDepositsWithBoost = await stakingUser.totalDepositsWithBoost();
+        expect(stakes.amountWithBoost).to.equal(expected);
+        expect(totalDepositsWithBoost).to.equal(expected + expected2);
 
         // user 2 stakes again, 99. should get 108 shares
         await stakingUser2.stake(99, lockDay);
         const stakes3 = await stakingUser2.stakes(user2.address, 1);
 
         const expected3 = 108; // 99 * 1.1
-        totalShares = await stakingUser.totalShares();
-        expect(stakes3.shares.toNumber()).to.equal(expected3);
-        expect(totalShares.toNumber()).to.equal(expected + expected2 + expected3);
+        totalDepositsWithBoost = await stakingUser.totalDepositsWithBoost();
+        expect(stakes3.amountWithBoost).to.equal(expected3);
+        expect(totalDepositsWithBoost).to.equal(expected + expected2 + expected3);
       });
 
       it("should properly calculate a user's proportional share with one week boost", async () => {
@@ -320,27 +300,27 @@ describe("CellarStaking", () => {
         const stakes2 = await stakingUser2.stakes(user2.address, 0);
 
         const expected2 = 70; // 50 * 1.4
-        let totalShares = await stakingUser.totalShares();
-        expect(stakes2.shares.toNumber()).to.equal(expected2);
-        expect(totalShares.toNumber()).to.equal(expected2);
+        let totalDepositsWithBoost = await stakingUser.totalDepositsWithBoost();
+        expect(stakes2.amountWithBoost).to.equal(expected2);
+        expect(totalDepositsWithBoost).to.equal(expected2);
 
         // user 1 stakes 100, should get 140 shares
         await stakingUser.stake(100, lockWeek);
         const stakes = await stakingUser.stakes(signers[1].address, 0);
 
         const expected = 140;
-        totalShares = await stakingUser.totalShares();
-        expect(stakes.shares.toNumber()).to.equal(expected);
-        expect(totalShares.toNumber()).to.equal(expected + expected2);
+        totalDepositsWithBoost = await stakingUser.totalDepositsWithBoost();
+        expect(stakes.amountWithBoost).to.equal(expected);
+        expect(totalDepositsWithBoost).to.equal(expected + expected2);
 
         // user 2 stakes again, 297. should get 415 shares due to rounding down
         await stakingUser2.stake(297, lockWeek);
         const stakes3 = await stakingUser2.stakes(user2.address, 1);
 
         const expected3 = 415; // 297 * 1.4 floored
-        totalShares = await stakingUser.totalShares();
-        expect(stakes3.shares.toNumber()).to.equal(expected3);
-        expect(totalShares.toNumber()).to.equal(expected + expected2 + expected3);
+        totalDepositsWithBoost = await stakingUser.totalDepositsWithBoost();
+        expect(stakes3.amountWithBoost).to.equal(expected3);
+        expect(totalDepositsWithBoost).to.equal(expected + expected2 + expected3);
       });
 
       it("should properly calculate a user's proportional share with two week boost", async () => {
@@ -353,128 +333,121 @@ describe("CellarStaking", () => {
         const stakes2 = await stakingUser2.stakes(user2.address, 0);
 
         const expected2 = 176;
-        let totalShares = await stakingUser.totalShares();
-        expect(stakes2.shares.toNumber()).to.equal(expected2);
-        expect(totalShares.toNumber()).to.equal(expected2);
+        let totalDepositsWithBoost = await stakingUser.totalDepositsWithBoost();
+        expect(stakes2.amountWithBoost).to.equal(expected2);
+        expect(totalDepositsWithBoost).to.equal(expected2);
 
         // user 1 stakes 100, should get 482 shares
         await stakingUser.stake(241, lockTwoWeeks);
         const stakes = await stakingUser.stakes(signers[1].address, 0);
 
         const expected = 482;
-        totalShares = await stakingUser.totalShares();
-        expect(stakes.shares.toNumber()).to.equal(expected);
-        expect(totalShares.toNumber()).to.equal(expected + expected2);
+        totalDepositsWithBoost = await stakingUser.totalDepositsWithBoost();
+        expect(stakes.amountWithBoost).to.equal(expected);
+        expect(totalDepositsWithBoost).to.equal(expected + expected2);
 
         // user 2 stakes again, 832. should get 1664 shares
         await stakingUser2.stake(832, lockTwoWeeks);
         const stakes3 = await stakingUser2.stakes(user2.address, 1);
 
         const expected3 = 1664;
-        totalShares = await stakingUser.totalShares();
-        expect(stakes3.shares.toNumber()).to.equal(expected3);
-        expect(totalShares.toNumber()).to.equal(expected + expected2 + expected3);
+        totalDepositsWithBoost = await stakingUser.totalDepositsWithBoost();
+        expect(stakes3.amountWithBoost).to.equal(expected3);
+        expect(totalDepositsWithBoost).to.equal(expected + expected2 + expected3);
       });
     });
 
     describe("unstake", () => {
-      describe("uninitialized", async () => {
-        it("should not allow unstaking if the rewards are not initialized", async () => {
-          const { stakingUser } = ctx;
-          await expect(stakingUser.unstake(0)).to.be.revertedWith("STATE_ContractPaused");
-        });
+      const rewardPerEpoch = ether(oneWeekSec.toString());
+      const stakeAmount = ether("1000");
+
+      beforeEach(async () => {
+        await ctx.staking.setRewardsDuration(oneWeekSec);
+
+        await ethers.provider.send("evm_setAutomine", [false]);
+
+        await ctx.staking.notifyRewardAmount(rewardPerEpoch);
+        await ctx.stakingUser.stake(stakeAmount, lockDay);
+
+        await ethers.provider.send("evm_mine", []);
+        await ethers.provider.send("evm_setAutomine", [true]);
       });
 
-      describe("initialized", () => {
-        const rewardPerEpoch = oneWeekSec;
-        const stakeAmount = ether("1000");
+      it("should revert if passed an out of bounds deposit id", async () => {
+        const { stakingUser } = ctx;
+        await expect(stakingUser.unstake(2)).to.be.revertedWith("USR_NoDeposit");
+      });
 
-        beforeEach(async () => {
-          await ctx.staking.initializePool(1, oneWeekSec);
-          await ctx.staking.replenishPool(1, oneWeekSec);
+      it("should not allow unstaking a stake that is still locked", async () => {
+        const { stakingUser } = ctx;
+        await expect(stakingUser.unstake(0)).to.be.revertedWith("USR_StakeLocked");
+      });
 
-          await ctx.stakingUser.stake(stakeAmount, lockDay);
-        });
+      it("should require a non-zero amount to unstake", async () => {
+        const { stakingUser, user, tokenDist } = ctx;
 
-        it("should revert if passed an out of bounds deposit id", async () => {
-          const { stakingUser } = ctx;
-          await expect(stakingUser.unstake(2)).to.be.revertedWith("USR_NoDeposit");
-        });
+        await increaseTime(oneWeekSec);
+        await stakingUser.unbond(0);
 
-        it("should not allow unstaking a stake that is still locked", async () => {
-          const { stakingUser } = ctx;
-          await expect(stakingUser.unstake(0)).to.be.revertedWith("USR_StakeLocked");
-        });
+        const prevBal = await tokenDist.balanceOf(user.address);
 
-        it("should require a non-zero amount to unstake", async () => {
-          const { stakingUser, user, tokenDist } = ctx;
+        const stake = await stakingUser.stakes(user.address, 0);
+        await setNextBlockTimestamp(stake.unbondTimestamp.toNumber() + 1);
 
-          await rollNextEpoch(stakingUser);
-          await stakingUser.unbond(0);
+        await stakingUser.unstake(0);
 
-          const prevBal = await tokenDist.balanceOf(user.address);
+        // single staker takes all rewards
+        const bal = await tokenDist.balanceOf(user.address);
+        expectRoundedEqual(bal.sub(prevBal), rewardPerEpoch);
+      });
 
-          const stake = await stakingUser.stakes(user.address, 0);
-          await setNextBlockTimestamp(stake.unbondTimestamp.toNumber() + 1);
+      it("should not unstake more than the deposited amount", async () => {
+        const { stakingUser, user, tokenStake } = ctx;
 
-          await stakingUser.unstake(0);
+        await increaseTime(oneWeekSec);
+        await stakingUser.unbond(0);
 
-          // single staker takes all rewards
-          const bal = await tokenDist.balanceOf(user.address);
-          expect(bal.sub(prevBal)).to.equal(rewardPerEpoch);
-        });
+        const prevBal = await tokenStake.balanceOf(user.address);
 
-        it("should not unstake more than the deposited amount", async () => {
-          const { stakingUser, user, tokenStake } = ctx;
+        const stake = await stakingUser.stakes(user.address, 0);
+        await setNextBlockTimestamp(stake.unbondTimestamp.toNumber() + 1);
 
-          await rollNextEpoch(stakingUser);
-          await stakingUser.unbond(0);
+        await stakingUser.unstake(0);
 
-          const prevBal = await tokenStake.balanceOf(user.address);
+        // previous bal + staked amount should equal current balance
+        const bal = await tokenStake.balanceOf(user.address);
+        expect(prevBal.add(stakeAmount)).to.equal(bal);
+      });
 
-          const stake = await stakingUser.stakes(user.address, 0);
-          await setNextBlockTimestamp(stake.unbondTimestamp.toNumber() + 1);
+      it("should unstake, distributing both the specified deposit amount and any accumulated rewards", async () => {
+        const { stakingUser, user, tokenStake, tokenDist } = ctx;
 
-          await stakingUser.unstake(0);
+        await increaseTime(oneWeekSec);
+        await stakingUser.unbond(0);
 
-          // previous bal + staked amount should equal current balance
-          const bal = await tokenStake.balanceOf(user.address);
-          expect(prevBal.add(stakeAmount)).to.equal(bal);
-        });
+        const prevBal = await tokenStake.balanceOf(user.address);
 
-        it("should not allow a user to unstake an amount smaller than the unit share size"); // @kvk does this test make sense still?
+        const stake = await stakingUser.stakes(user.address, 0);
+        await setNextBlockTimestamp(stake.unbondTimestamp.toNumber() + 1);
 
-        it("should unstake, distributing both the specified deposit amount and any accumulated rewards", async () => {
-          const { stakingUser, user, tokenStake, tokenDist } = ctx;
+        await stakingUser.unstake(0);
 
-          await rollNextEpoch(stakingUser);
-          await stakingUser.unbond(0);
+        // previous bal + staked amount should equal current balance
+        const bal = await tokenStake.balanceOf(user.address);
+        expect(prevBal.add(stakeAmount)).to.equal(bal);
 
-          const prevBal = await tokenStake.balanceOf(user.address);
-
-          const stake = await stakingUser.stakes(user.address, 0);
-          await setNextBlockTimestamp(stake.unbondTimestamp.toNumber() + 1);
-
-          await stakingUser.unstake(0);
-
-          // previous bal + staked amount should equal current balance
-          const bal = await tokenStake.balanceOf(user.address);
-          expect(prevBal.add(stakeAmount)).to.equal(bal);
-
-          const rewardsBal = await tokenDist.balanceOf(user.address);
-          expect(rewardsBal).to.equal(rewardPerEpoch);
-        });
+        const rewardsBal = await tokenDist.balanceOf(user.address);
+        expectRoundedEqual(rewardsBal, rewardPerEpoch);
       });
     });
 
     describe.only("unstakeAll", () => {
-      const rewardPerEpoch = 2_000_000; // 2M
+      const rewardPerEpoch = ether(String(2_000_000)); // 2M
       const stakeAmount = ether("50000");
 
       beforeEach(async () => {
-        await ctx.staking.initializePool(1, oneWeekSec);
-        await ctx.staking.replenishPool(1, oneWeekSec);
-        await ctx.staking.replenishPool(1, oneWeekSec);
+        await ctx.staking.setRewardsDuration(oneWeekSec * 3);
+        await ctx.staking.notifyRewardAmount(rewardPerEpoch.mul(3));
         await ctx.stakingUser.stake(stakeAmount, lockDay);
       });
 
@@ -483,34 +456,43 @@ describe("CellarStaking", () => {
         const user2 = signers[2];
         const stakingUser2 = await connectUser(user2);
 
-        // user1 should collect all of first epoch reward
-        await rollNextEpoch(stakingUser);
+        // user1 should collect all of first week reward
+        await increaseTime(oneWeekSec);
 
-        // epoch 2 reward should be split 2/3 to 1/3
+        // week 2 and 3 reward should be split 2/3 to 1/3
         await stakingUser2.stake(stakeAmount, lockDay);
         await stakingUser.stake(stakeAmount, lockDay);
 
-        await rollNextEpoch(stakingUser);
+        // End rewards
+        await increaseTime(oneWeekSec * 3);
+
         await stakingUser.unbondAll();
+        await stakingUser2.unbondAll();
 
         const prevStakeBal = await tokenStake.balanceOf(user.address);
         const prevDistBal = await tokenDist.balanceOf(user.address);
 
         const stake = await stakingUser.stakes(user.address, 0);
         await setNextBlockTimestamp(stake.unbondTimestamp.toNumber() + 1);
-        console.log('GONNA UNSTAKE ALL');
+
         await stakingUser.unstakeAll();
-        console.log('DID IT');
+        await stakingUser2.unstakeAll();
 
         // expect to recover balance that was initially staked
-        const totalStaked = stakeAmount.add(stakeAmount);
+        const totalStaked = stakeAmount.mul(2);
         const stakeBal = await tokenStake.balanceOf(user.address);
+
         expect(prevStakeBal.add(BigNumber.from(totalStaked))).to.equal(stakeBal);
 
-        // expect to collect all rewards of first epoch and 2/3 of 2nd epoch
-        const expectedRewards = rewardPerEpoch + Math.floor((rewardPerEpoch * 2) / 3);
-        const distBal = await tokenDist.balanceOf(user.address);
-        expect(distBal.sub(prevDistBal)).to.equal(expectedRewards);
+        // expect to collect all rewards of first week, and 2/3 rewards of weeks 2 and 3
+        // for 7/9 total
+        const expectedRewardsUser1 = rewardPerEpoch.div(3).mul(7);
+        const distBalUser1 = await tokenDist.balanceOf(user.address);
+        expectRoundedEqual(distBalUser1.sub(prevDistBal), expectedRewardsUser1);
+
+        const expectedRewardsUser2 = rewardPerEpoch.div(3).mul(2);
+        const distBalUser2 = await tokenDist.balanceOf(user2.address);
+        expectRoundedEqual(distBalUser2.sub(prevDistBal), expectedRewardsUser2);
       });
     });
 
@@ -521,12 +503,11 @@ describe("CellarStaking", () => {
 
       describe("initialized", () => {
         const rewardPerEpoch = oneWeekSec;
-        const stakeAmount = 1000;
-        const stakeAmountBN = BigNumber.from(stakeAmount);
+        const stakeAmount = ether("1000");
 
         beforeEach(async () => {
-          await ctx.staking.initializePool(1, oneWeekSec);
-          await ctx.staking.replenishPool(1, oneWeekSec);
+          await ctx.staking.setRewardsDuration(oneWeekSec);
+          await ctx.staking.notifyRewardAmount(rewardPerEpoch);
           await ctx.stakingUser.stake(stakeAmount, lockDay);
         });
 
@@ -546,62 +527,62 @@ describe("CellarStaking", () => {
       it("should claim all available rewards for all deposits, across multiple epochs");
     });
 
-    describe("emergencyUnstake", () => {
-      beforeEach(async () => {
-        await ctx.staking.initializePool(1, oneWeekSec);
-      });
+    // describe("emergencyUnstake", () => {
+    //   beforeEach(async () => {
+    //     await ctx.staking.initializePool(1, oneWeekSec);
+    //   });
 
-      it("should revert if the staking program has not been ended", async () => {
-        const { stakingUser } = ctx;
+    //   it("should revert if the staking program has not been ended", async () => {
+    //     const { stakingUser } = ctx;
 
-        await expect(stakingUser.emergencyUnstake()).to.be.revertedWith("STATE_NoEmergencyUnstake");
-      });
+    //     await expect(stakingUser.emergencyUnstake()).to.be.revertedWith("STATE_NoEmergencyUnstake");
+    //   });
 
-      it("should return all staked tokens, across multiple stakes, regardless of lock status", async () => {
-        const { connectUser, signers, staking, stakingUser, tokenStake, user } = ctx;
-        await stakingUser.stake(initialTokenAmount, lockDay);
-        expect(await tokenStake.balanceOf(user.address)).to.equal(0);
+    //   it("should return all staked tokens, across multiple stakes, regardless of lock status", async () => {
+    //     const { connectUser, signers, staking, stakingUser, tokenStake, user } = ctx;
+    //     await stakingUser.stake(initialTokenAmount, lockDay);
+    //     expect(await tokenStake.balanceOf(user.address)).to.equal(0);
 
-        const user2 = signers[2];
-        const stakingUser2 = await connectUser(user2);
-        await stakingUser2.stake(initialTokenAmount, lockWeek);
-        expect(await tokenStake.balanceOf(user2.address)).to.equal(0);
+    //     const user2 = signers[2];
+    //     const stakingUser2 = await connectUser(user2);
+    //     await stakingUser2.stake(initialTokenAmount, lockWeek);
+    //     expect(await tokenStake.balanceOf(user2.address)).to.equal(0);
 
-        const user3 = signers[3];
-        const stakingUser3 = await connectUser(user3);
-        await stakingUser3.stake(initialTokenAmount, lockTwoWeeks);
-        expect(await tokenStake.balanceOf(user3.address)).to.equal(0);
+    //     const user3 = signers[3];
+    //     const stakingUser3 = await connectUser(user3);
+    //     await stakingUser3.stake(initialTokenAmount, lockTwoWeeks);
+    //     expect(await tokenStake.balanceOf(user3.address)).to.equal(0);
 
-        await staking.emergencyStop(false);
-        await stakingUser.emergencyUnstake();
-        expect(await tokenStake.balanceOf(user.address)).to.equal(initialTokenAmount);
+    //     await staking.emergencyStop(false);
+    //     await stakingUser.emergencyUnstake();
+    //     expect(await tokenStake.balanceOf(user.address)).to.equal(initialTokenAmount);
 
-        await stakingUser2.emergencyUnstake();
-        expect(await tokenStake.balanceOf(user2.address)).to.equal(initialTokenAmount);
+    //     await stakingUser2.emergencyUnstake();
+    //     expect(await tokenStake.balanceOf(user2.address)).to.equal(initialTokenAmount);
 
-        await stakingUser3.emergencyUnstake();
-        expect(await tokenStake.balanceOf(user3.address)).to.equal(initialTokenAmount);
-      });
+    //     await stakingUser3.emergencyUnstake();
+    //     expect(await tokenStake.balanceOf(user3.address)).to.equal(initialTokenAmount);
+    //   });
 
-      it("should allow rewards to be claimable");
-    });
+    //   it("should allow rewards to be claimable");
+    // });
 
-    describe("emergencyClaim", () => {
-      it("should revert if the staking program has not been ended", async () => {
-        const { stakingUser } = ctx;
+    // describe("emergencyClaim", () => {
+    //   it("should revert if the staking program has not been ended", async () => {
+    //     const { stakingUser } = ctx;
 
-        await expect(stakingUser.emergencyClaim()).to.be.revertedWith("STATE_NoEmergencyUnstake");
-      });
+    //     await expect(stakingUser.emergencyClaim()).to.be.revertedWith("STATE_NoEmergencyUnstake");
+    //   });
 
-      it("should revert if the contract stopped with claim disabled", async () => {
-        const { staking, stakingUser } = ctx;
+    //   it("should revert if the contract stopped with claim disabled", async () => {
+    //     const { staking, stakingUser } = ctx;
 
-        await staking.emergencyStop(false);
-        await expect(stakingUser.emergencyClaim()).to.be.revertedWith("STATE_NoEmergencyClaim");
-      });
+    //     await staking.emergencyStop(false);
+    //     await expect(stakingUser.emergencyClaim()).to.be.revertedWith("STATE_NoEmergencyClaim");
+    //   });
 
-      it("should return all staked tokens and distribute all unclaimed rewards");
-    });
+    //   it("should return all staked tokens and distribute all unclaimed rewards");
+    // });
   });
 
   // describe("Admin Operations", () => {

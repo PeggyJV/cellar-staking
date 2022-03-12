@@ -11,7 +11,12 @@ pragma solidity >=0.8.4;
 /// These errors can be resolved by callers updating their arguments.
 
 /**
- * @notice User attempted to stake an amount smaller than the minimu deposit.
+ * @notice User attempted to stake zero amout.
+ */
+error USR_ZeroDeposit();
+
+/**
+ * @notice User attempted to stake an amount smaller than the minimum deposit.
  *
  * @param amount                Amount user attmpted to stake.
  * @param minimumDeposit        The minimum deopsit amount accepted.

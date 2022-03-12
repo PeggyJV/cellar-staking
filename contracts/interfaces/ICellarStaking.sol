@@ -16,7 +16,7 @@ interface ICellarStaking {
     event Stake(address indexed user, uint256 depositId, uint256 amount);
     event Unbond(address indexed user, uint256 depositId, uint256 amount);
     event CancelUnbond(address indexed user, uint256 depositId);
-    event Unstake(address indexed user, uint256 depositId, uint256 amount);
+    event Unstake(address indexed user, uint256 depositId, uint256 amount, uint256 reward);
     event Claim(address indexed user, uint256 depositId, uint256 amount);
     event EmergencyStop(address owner, bool claimable);
     event EmergencyUnstake(address indexed user, uint256 depositId, uint256 amount);
