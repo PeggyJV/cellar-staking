@@ -758,7 +758,8 @@ describe("CellarStaking", () => {
         await stakingUser2.unbondAll();
 
         const prevStakeBal = await tokenStake.balanceOf(user.address);
-        const prevDistBal = await tokenDist.balanceOf(user.address);
+        const prevDistBalUser1 = await tokenDist.balanceOf(user.address);
+        const prevDistBalUser2 = await tokenDist.balanceOf(user2.address);
 
         const stake = await stakingUser.stakes(user.address, 0);
         await setNextBlockTimestamp(stake.unbondTimestamp.toNumber() + 1);
@@ -776,42 +777,287 @@ describe("CellarStaking", () => {
         // for 7/9 total
         const expectedRewardsUser1 = rewardPerEpoch.div(3).mul(7);
         const distBalUser1 = await tokenDist.balanceOf(user.address);
-        expectRoundedEqual(distBalUser1.sub(prevDistBal), expectedRewardsUser1);
+        expectRoundedEqual(distBalUser1.sub(prevDistBalUser1), expectedRewardsUser1);
 
         const expectedRewardsUser2 = rewardPerEpoch.div(3).mul(2);
         const distBalUser2 = await tokenDist.balanceOf(user2.address);
-        expectRoundedEqual(distBalUser2.sub(prevDistBal), expectedRewardsUser2);
+        expectRoundedEqual(distBalUser2.sub(prevDistBalUser2), expectedRewardsUser2);
       });
     });
 
     describe("claim", () => {
-      describe("uninitialized", () => {
-        it("should not allow claiming if the rewards are not initialized");
+      const rewardPerEpoch = ether(oneWeekSec.toString());
+      const stakeAmount = ether("1000");
+
+      beforeEach(async () => {
+        await ctx.staking.setRewardsDuration(oneWeekSec);
+        await ctx.staking.notifyRewardAmount(rewardPerEpoch);
+        await ctx.stakingUser.stake(stakeAmount, lockDay);
       });
 
-      describe("initialized", () => {
-        const rewardPerEpoch = oneWeekSec;
-        const stakeAmount = ether("1000");
+      it("claims available rewards for a given deposit", async () => {
+        const { stakingUser, user, tokenDist } = ctx;
 
-        beforeEach(async () => {
-          await ctx.staking.setRewardsDuration(oneWeekSec);
-          await ctx.staking.notifyRewardAmount(rewardPerEpoch);
-          await ctx.stakingUser.stake(stakeAmount, lockDay);
-        });
+        // Run through rewards time - should get all
+        await increaseTime(oneWeekSec);
 
-        it("claim available rewards for a given deposit");
-        it("should correctly calculate rewards for two claims within the same epoch");
-        it("should correctly calculate rewards across multiple epochs");
-        it("should corretctly calculate proportional rewards across different user's stakes, in the same epoch");
-        it(
-          "should correctly calculate proportional rewards for different user stakes, deposited during different epochs",
-        );
-        it("should not redistribute rewards tha have already been claimed");
+        const balanceBefore = await tokenDist.balanceOf(user.address);
+
+        const tx = await stakingUser.claim(0);
+        const receipt = await tx.wait();
+
+        const claimEvent = receipt.events?.find(e => e.event === "Claim");
+
+        expect(claimEvent).to.not.be.undefined;
+        expect(claimEvent?.args?.[0]).to.equal(user.address);
+        expect(claimEvent?.args?.[1]).to.equal(0);
+        expectRoundedEqual(claimEvent?.args?.[2], rewardPerEpoch);
+
+        // Check rewards are reset
+        const stake = await stakingUser.stakes(user.address, 0);
+
+        expect(stake.amount).to.equal(stakeAmount);
+        expect(stake.rewards).to.equal(0);
+
+        // Check rewards are in wallet
+        const balanceAfter = await tokenDist.balanceOf(user.address);
+        expectRoundedEqual(balanceAfter.sub(balanceBefore), rewardPerEpoch);
+      });
+
+      it("should correctly calculate rewards for two claims", async () => {
+        const { connectUser, signers, stakingUser, user, tokenDist } = ctx;
+        const user2 = signers[2];
+        const stakingUser2 = await connectUser(user2);
+
+        await stakingUser2.stake(stakeAmount, lockDay);
+
+        // Run through rewards time - should be all distributed
+        await increaseTime(oneWeekSec);
+
+        const balanceBeforeUser1 = await tokenDist.balanceOf(user.address);
+        const balanceBeforeUser2 = await tokenDist.balanceOf(user2.address);
+
+        let tx = await stakingUser.claim(0);
+        let receipt = await tx.wait();
+
+        let claimEvent = receipt.events?.find(e => e.event === "Claim");
+
+        expect(claimEvent).to.not.be.undefined;
+        expect(claimEvent?.args?.[0]).to.equal(user.address);
+        expect(claimEvent?.args?.[1]).to.equal(0);
+        expectRoundedEqual(claimEvent?.args?.[2], rewardPerEpoch.div(2));
+
+        await increaseTime(oneWeekSec);
+
+        tx = await stakingUser2.claim(0);
+        receipt = await tx.wait();
+
+        claimEvent = receipt.events?.find(e => e.event === "Claim");
+
+        expect(claimEvent).to.not.be.undefined;
+        expect(claimEvent?.args?.[0]).to.equal(user2.address);
+        expect(claimEvent?.args?.[1]).to.equal(0);
+        expectRoundedEqual(claimEvent?.args?.[2], rewardPerEpoch.div(2));
+
+        // Check rewards are reset
+        let stake = await stakingUser.stakes(user.address, 0);
+
+        expect(stake.amount).to.equal(stakeAmount);
+        expect(stake.rewards).to.equal(0);
+
+        stake = await stakingUser.stakes(user2.address, 0);
+
+        expect(stake.amount).to.equal(stakeAmount);
+        expect(stake.rewards).to.equal(0);
+
+        // Check rewards are in wallet
+        const balanceAfterUser1 = await tokenDist.balanceOf(user.address);
+        expectRoundedEqual(balanceAfterUser1.sub(balanceBeforeUser1), rewardPerEpoch.div(2));
+
+        const balanceAfterUser2 = await tokenDist.balanceOf(user.address);
+        expectRoundedEqual(balanceAfterUser2.sub(balanceBeforeUser2), rewardPerEpoch.div(2));
+      });
+
+      it("should correctly calculate rewards for subsequent claims", async () => {
+        const { stakingUser, user, tokenDist } = ctx;
+
+        // Run through half time - should get half
+        await increaseTime(oneWeekSec / 2);
+
+        const balanceBefore = await tokenDist.balanceOf(user.address);
+
+        let tx = await stakingUser.claim(0);
+        let receipt = await tx.wait();
+
+        let claimEvent = receipt.events?.find(e => e.event === "Claim");
+
+        expect(claimEvent).to.not.be.undefined;
+        expect(claimEvent?.args?.[0]).to.equal(user.address);
+        expect(claimEvent?.args?.[1]).to.equal(0);
+        expectRoundedEqual(claimEvent?.args?.[2], rewardPerEpoch.div(2));
+
+        // Check rewards are reset
+        let stake = await stakingUser.stakes(user.address, 0);
+
+        expect(stake.amount).to.equal(stakeAmount);
+        expect(stake.rewards).to.equal(0);
+
+        // Check rewards are in wallet
+        let balanceAfter = await tokenDist.balanceOf(user.address);
+        expectRoundedEqual(balanceAfter.sub(balanceBefore), rewardPerEpoch.div(2));
+
+        // Run through the next half, should get another half rewards
+        await increaseTime(oneWeekSec / 2);
+
+        const balanceIntermediate = balanceAfter;
+
+        tx = await stakingUser.claim(0);
+        receipt = await tx.wait();
+
+        claimEvent = receipt.events?.find(e => e.event === "Claim");
+
+        expect(claimEvent).to.not.be.undefined;
+        expect(claimEvent?.args?.[0]).to.equal(user.address);
+        expect(claimEvent?.args?.[1]).to.equal(0);
+        expectRoundedEqual(claimEvent?.args?.[2], rewardPerEpoch.div(2));
+
+        // Check rewards are reset
+        stake = await stakingUser.stakes(user.address, 0);
+
+        expect(stake.amount).to.equal(stakeAmount);
+        expect(stake.rewards).to.equal(0);
+
+        // Check rewards are in wallet
+        balanceAfter = await tokenDist.balanceOf(user.address);
+        expectRoundedEqual(balanceAfter.sub(balanceIntermediate), rewardPerEpoch.div(2));
+      });
+
+      it("should correctly calculate proportional rewards across different user stakes", async () => {
+        const { stakingUser, user, tokenDist } = ctx;
+
+        // Should get larger boost
+        await stakingUser.stake(stakeAmount, lockWeek);
+
+        // Run through rewards time - should be all distributed
+        await increaseTime(oneWeekSec);
+
+        // Should be 110 vs. 140 for two stakes - 250 total
+
+        const balanceBefore = await tokenDist.balanceOf(user.address);
+
+        let tx = await stakingUser.claim(0);
+        let receipt = await tx.wait();
+
+        let claimEvent = receipt.events?.find(e => e.event === "Claim");
+
+        expect(claimEvent).to.not.be.undefined;
+        expect(claimEvent?.args?.[0]).to.equal(user.address);
+        expect(claimEvent?.args?.[1]).to.equal(0);
+        expectRoundedEqual(claimEvent?.args?.[2], rewardPerEpoch.div(25).mul(11));
+
+        // Check rewards are reset
+        let stake = await stakingUser.stakes(user.address, 0);
+
+        expect(stake.amount).to.equal(stakeAmount);
+        expect(stake.rewards).to.equal(0);
+
+        // Claim second stake
+        tx = await stakingUser.claim(1);
+        receipt = await tx.wait();
+
+        claimEvent = receipt.events?.find(e => e.event === "Claim");
+
+        expect(claimEvent).to.not.be.undefined;
+        expect(claimEvent?.args?.[0]).to.equal(user.address);
+        expect(claimEvent?.args?.[1]).to.equal(1);
+        expectRoundedEqual(claimEvent?.args?.[2], rewardPerEpoch.div(25).mul(14));
+
+        stake = await stakingUser.stakes(user.address, 1);
+
+        expect(stake.amount).to.equal(stakeAmount);
+        expect(stake.rewards).to.equal(0);
+
+        // Check rewards are in wallet
+        const balanceAfter = await tokenDist.balanceOf(user.address);
+        expectRoundedEqual(balanceAfter.sub(balanceBefore), rewardPerEpoch);
+      });
+
+      it("should not redistribute rewards that have already been claimed", async () => {
+        const { stakingUser, user, tokenDist } = ctx;
+
+        // Run through rewards time - should get all
+        await increaseTime(oneWeekSec);
+
+        const balanceBefore = await tokenDist.balanceOf(user.address);
+
+        await expect(stakingUser.claim(0)).to.not.be.reverted;
+
+        // Check rewards are reset
+        const stake = await stakingUser.stakes(user.address, 0);
+
+        expect(stake.amount).to.equal(stakeAmount);
+        expect(stake.rewards).to.equal(0);
+
+        // Check rewards are in wallet
+        const balanceAfter = await tokenDist.balanceOf(user.address);
+        expectRoundedEqual(balanceAfter.sub(balanceBefore), rewardPerEpoch);
+
+        // Try to claim again
+        const tx = await stakingUser.claim(0);
+        const receipt = await tx.wait();
+
+        const claimEvent = receipt.events?.find(e => e.event === "Claim");
+
+        expect(claimEvent).to.not.be.undefined;
+        expect(claimEvent?.args?.[0]).to.equal(user.address);
+        expect(claimEvent?.args?.[1]).to.equal(0);
+        expect(claimEvent?.args?.[2]).to.equal(0);
+
+        // No rewards claimed
+        expect(await tokenDist.balanceOf(user.address)).to.equal(balanceAfter);
       });
     });
 
     describe("claimAll", () => {
-      it("should claim all available rewards for all deposits, within the same epoch");
+      const rewardPerEpoch = ether(String(2_000_000)); // 2M
+      const stakeAmount = ether("50000");
+
+      it("should claim all available rewards for all deposits", async () => {
+        const { connectUser, signers, staking, stakingUser, user, tokenDist } = ctx;
+
+        await staking.setRewardsDuration(oneWeekSec * 3);
+        await staking.notifyRewardAmount(rewardPerEpoch.mul(3));
+        await stakingUser.stake(stakeAmount, lockDay);
+
+        const user2 = signers[2];
+        const stakingUser2 = await connectUser(user2);
+
+        // user1 should collect all of first week reward
+        await increaseTime(oneWeekSec);
+
+        // week 2 and 3 reward should be split 2/3 to 1/3
+        await stakingUser2.stake(stakeAmount, lockDay);
+        await stakingUser.stake(stakeAmount, lockDay);
+
+        // End rewards
+        await increaseTime(oneWeekSec * 3);
+
+        const prevDistBalUser1 = await tokenDist.balanceOf(user.address);
+        const prevDistBalUser2 = await tokenDist.balanceOf(user2.address);
+
+        await stakingUser.claimAll();
+        await stakingUser2.claimAll();
+
+        // expect to collect all rewards of first week, and 2/3 rewards of weeks 2 and 3
+        // for 7/9 total
+        const expectedRewardsUser1 = rewardPerEpoch.div(3).mul(7);
+        const distBalUser1 = await tokenDist.balanceOf(user.address);
+        expectRoundedEqual(distBalUser1.sub(prevDistBalUser1), expectedRewardsUser1);
+
+        const expectedRewardsUser2 = rewardPerEpoch.div(3).mul(2);
+        const distBalUser2 = await tokenDist.balanceOf(user2.address);
+        expectRoundedEqual(distBalUser2.sub(prevDistBalUser2), expectedRewardsUser2);
+      });
     });
 
     // describe("emergencyUnstake", () => {
