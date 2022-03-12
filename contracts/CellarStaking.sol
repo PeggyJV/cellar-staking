@@ -427,7 +427,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         uint256 depositAmount = s.amount;
 
         if (depositAmount == 0) revert USR_NoDeposit(depositId);
-        if (block.timestamp < s.unbondTimestamp || s.unbondTimestamp == 0) revert USR_StakeLocked(depositId);
+        if (s.unbondTimestamp == 0 || block.timestamp < s.unbondTimestamp) revert USR_StakeLocked(depositId);
 
         _updateRewardForStake(msg.sender, depositId);
 

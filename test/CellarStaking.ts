@@ -116,11 +116,54 @@ describe("CellarStaking", () => {
 
       it("should allow one user to stake with 100% proportional share", async () => {
         const { stakingUser, user } = ctx;
-        await stakingUser.stake(100000, lockDay);
+        const stakeAmount = ether("100000");
 
-        const stakes = await stakingUser.stakes(user.address, 0);
+        await expect(stakingUser.stake(stakeAmount, lockDay))
+          .to.emit(stakingUser, "Stake")
+          .withArgs(user.address, 0, stakeAmount);
+
+        const stake = await stakingUser.stakes(user.address, 0);
+        const totalDeposits = await stakingUser.totalDeposits();
         const totalDepositsWithBoost = await stakingUser.totalDepositsWithBoost();
-        expect(stakes.amountWithBoost).to.equal(totalDepositsWithBoost);
+        const rewardPerTokenStored = await stakingUser.rewardPerTokenStored();
+
+        expect(stake.amount).to.equal(stakeAmount);
+        expect(stake.amount).to.equal(totalDeposits);
+        expect(stake.amountWithBoost).to.equal(totalDepositsWithBoost);
+        expect(stake.rewardPerTokenPaid).to.equal(rewardPerTokenStored);
+        expect(stake.rewards).to.equal(0);
+        expect(stake.unbondTimestamp).to.equal(0);
+        expect(stake.lock).to.equal(lockDay);
+      });
+
+      it("should calculate the correct boosts for different lock times", async () => {
+        const { stakingUser, user } = ctx;
+        const stakeAmount = ether("100000");
+
+        await expect(stakingUser.stake(stakeAmount, lockDay)).to.not.be.reverted;
+        await expect(stakingUser.stake(stakeAmount, lockWeek)).to.not.be.reverted;
+        await expect(stakingUser.stake(stakeAmount, lockTwoWeeks)).to.not.be.reverted;
+
+        let stake = await stakingUser.stakes(user.address, 0);
+        let boostMultiplier = stakeAmount.mul(await stakingUser.ONE_DAY_BOOST()).div(ether("1"));
+        let expectedAmountWithBoost = stakeAmount.add(boostMultiplier);
+
+        expect(stake.amount).to.equal(stakeAmount);
+        expect(stake.amountWithBoost).to.equal(expectedAmountWithBoost);
+
+        stake = await stakingUser.stakes(user.address, 1);
+        boostMultiplier = stakeAmount.mul(await stakingUser.ONE_WEEK_BOOST()).div(ether("1"));
+        expectedAmountWithBoost = stakeAmount.add(boostMultiplier);
+
+        expect(stake.amount).to.equal(stakeAmount);
+        expect(stake.amountWithBoost).to.equal(expectedAmountWithBoost);
+
+        stake = await stakingUser.stakes(user.address, 2);
+        boostMultiplier = stakeAmount.mul(await stakingUser.TWO_WEEKS_BOOST()).div(ether("1"));
+        expectedAmountWithBoost = stakeAmount.add(boostMultiplier);
+
+        expect(stake.amount).to.equal(stakeAmount);
+        expect(stake.amountWithBoost).to.equal(expectedAmountWithBoost);
       });
 
       it("should allow two users to stake with an even proportional share", async () => {
@@ -357,6 +400,222 @@ describe("CellarStaking", () => {
       });
     });
 
+    describe("unbond", () => {
+      const rewardPerEpoch = ether(oneWeekSec.toString());
+      const stakeAmount = ether("1000");
+
+      beforeEach(async () => {
+        await ctx.staking.setRewardsDuration(oneWeekSec);
+
+        await ctx.staking.notifyRewardAmount(rewardPerEpoch);
+        await ctx.stakingUser.stake(stakeAmount, lockDay);
+      });
+
+      it("should revert if passed an out of bounds deposit ID", async () => {
+        const { stakingUser } = ctx;
+        await expect(stakingUser.unbond(2)).to.be.revertedWith("USR_NoDeposit");
+      });
+
+      it("should revert if the specified deposit is already unbonding", async () => {
+        const { stakingUser } = ctx;
+        await expect(stakingUser.unbond(0)).to.not.be.reverted;
+
+        await expect(stakingUser.unbond(0)).to.be.revertedWith("USR_AlreadyUnbonding");
+      });
+
+      it("should unbond a stake and remove any boosts", async () => {
+        const { stakingUser, user } = ctx;
+
+        const stake = await stakingUser.stakes(user.address, 0);
+        const boostMultiplier = stakeAmount.mul(await stakingUser.ONE_DAY_BOOST()).div(ether("1"));
+        const expectedAmountWithBoost = stakeAmount.add(boostMultiplier);
+        expect(stake.amount).to.equal(stakeAmount);
+        expect(stake.amountWithBoost).to.equal(expectedAmountWithBoost);
+        expect(stake.unbondTimestamp).to.equal(0);
+        expect(stake.lock).to.equal(lockDay);
+
+        await expect(stakingUser.unbond(0))
+          .to.emit(stakingUser, "Unbond")
+          .withArgs(user.address, 0, stakeAmount);
+
+        // Check updated stake
+        const updatedStake = await stakingUser.stakes(user.address, 0);
+        const latestBlock = await ethers.provider.getBlock("latest");
+
+        expect(updatedStake.amount).to.equal(stakeAmount);
+        expect(updatedStake.amountWithBoost).to.equal(stakeAmount);
+        expect(updatedStake.unbondTimestamp).to.equal(latestBlock.timestamp + oneDaySec);
+        expect(updatedStake.lock).to.equal(lockDay);
+      });
+    });
+
+    describe("unbondAll", () => {
+      const rewardPerEpoch = ether(oneWeekSec.toString());
+      const stakeAmount = ether("1000");
+
+      it("should unbond all stakes, skipping ones that have already been unbonded", async () => {
+        const { staking, stakingUser, user } = ctx;
+
+        await staking.setRewardsDuration(oneWeekSec);
+
+        await staking.notifyRewardAmount(rewardPerEpoch);
+        await stakingUser.stake(stakeAmount, lockDay);
+
+        // Stake again
+        await stakingUser.stake(stakeAmount.mul(2), lockWeek);
+        await stakingUser.stake(stakeAmount.mul(3), lockTwoWeeks);
+
+        // Unbond one stake
+        await expect(stakingUser.unbond(1))
+          .to.emit(stakingUser, "Unbond")
+          .withArgs(user.address, 1, stakeAmount.mul(2));
+
+        // Check updated stake
+        let updatedStake = await stakingUser.stakes(user.address, 1);
+        let latestBlock = await ethers.provider.getBlock("latest");
+
+        expect(updatedStake.amount).to.equal(stakeAmount.mul(2));
+        expect(updatedStake.amountWithBoost).to.equal(stakeAmount.mul(2));
+        expect(updatedStake.unbondTimestamp).to.equal(latestBlock.timestamp + oneWeekSec);
+        expect(updatedStake.lock).to.equal(lockWeek);
+
+        const tx = await stakingUser.unbondAll();
+        const receipt = await tx.wait();
+
+        const unbondEvents = await receipt.events?.filter((e) => e.event === "Unbond");
+        expect(unbondEvents?.length === 2);
+
+        // Check other stakes updated
+        updatedStake = await stakingUser.stakes(user.address, 0);
+        latestBlock = await ethers.provider.getBlock("latest");
+
+        expect(updatedStake.amount).to.equal(stakeAmount);
+        expect(updatedStake.amountWithBoost).to.equal(stakeAmount);
+        expect(updatedStake.unbondTimestamp).to.equal(latestBlock.timestamp + oneDaySec);
+        expect(updatedStake.lock).to.equal(lockDay);
+
+        updatedStake = await stakingUser.stakes(user.address, 2);
+
+        expect(updatedStake.amount).to.equal(stakeAmount.mul(3));
+        expect(updatedStake.amountWithBoost).to.equal(stakeAmount.mul(3));
+        expect(updatedStake.unbondTimestamp).to.equal(latestBlock.timestamp + oneWeekSec * 2);
+        expect(updatedStake.lock).to.equal(lockTwoWeeks);
+      });
+    });
+
+    describe("cancelUnbonding", () => {
+      const rewardPerEpoch = ether(oneWeekSec.toString());
+      const stakeAmount = ether("1000");
+
+      beforeEach(async () => {
+        await ctx.staking.setRewardsDuration(oneWeekSec);
+
+        await ctx.staking.notifyRewardAmount(rewardPerEpoch);
+        await ctx.stakingUser.stake(stakeAmount, lockDay);
+      });
+
+      it("should revert if passed an out of bounds deposit ID", async () => {
+        const { stakingUser } = ctx;
+        await expect(stakingUser.cancelUnbonding(2)).to.be.revertedWith("USR_NoDeposit");
+      });
+
+      it("should revert if the specified deposit is not unbonding", async () => {
+        const { stakingUser } = ctx;
+        await expect(stakingUser.cancelUnbonding(0)).to.be.revertedWith("USR_NotUnbonding");
+      });
+
+      it("should cancel unbonding for a stake and reinstate any boosts", async () => {
+        const { stakingUser, user } = ctx;
+
+        const stake = await stakingUser.stakes(user.address, 0);
+        const boostMultiplier = stakeAmount.mul(await stakingUser.ONE_DAY_BOOST()).div(ether("1"));
+        const expectedAmountWithBoost = stakeAmount.add(boostMultiplier);
+        expect(stake.amount).to.equal(stakeAmount);
+        expect(stake.amountWithBoost).to.equal(expectedAmountWithBoost);
+        expect(stake.unbondTimestamp).to.equal(0);
+        expect(stake.lock).to.equal(lockDay);
+
+        await expect(stakingUser.unbond(0)).to.not.be.reverted;
+
+        // Check updated stake
+        const updatedStake = await stakingUser.stakes(user.address, 0);
+        const latestBlock = await ethers.provider.getBlock("latest");
+
+        expect(updatedStake.amount).to.equal(stakeAmount);
+        expect(updatedStake.amountWithBoost).to.equal(stakeAmount);
+        expect(updatedStake.unbondTimestamp).to.equal(latestBlock.timestamp + oneDaySec);
+        expect(updatedStake.lock).to.equal(lockDay);
+
+        // Now cancel
+        await expect(stakingUser.cancelUnbonding(0))
+          .to.emit(stakingUser, "CancelUnbond")
+          .withArgs(user.address, 0);
+
+        const originalStake = await stakingUser.stakes(user.address, 0);
+
+        expect(originalStake.amount).to.equal(stakeAmount);
+        expect(originalStake.amountWithBoost).to.equal(expectedAmountWithBoost);
+        expect(originalStake.unbondTimestamp).to.equal(0);
+        expect(originalStake.lock).to.equal(lockDay);
+      });
+    });
+
+    describe("cancelUnbondingAll", () => {
+      const rewardPerEpoch = ether(oneWeekSec.toString());
+      const stakeAmount = ether("1000");
+
+      it("should cancel unbonding all stakes, skipping ones that are not unbonding", async () => {
+        const { staking, stakingUser, user } = ctx;
+
+        await staking.setRewardsDuration(oneWeekSec);
+
+        await staking.notifyRewardAmount(rewardPerEpoch);
+        await stakingUser.stake(stakeAmount, lockDay);
+
+        // Stake again
+        await stakingUser.stake(stakeAmount, lockWeek);
+        await stakingUser.stake(stakeAmount, lockTwoWeeks);
+
+        // Unbond two stakes
+        await expect(stakingUser.unbond(1)).to.not.be.reverted;
+        await expect(stakingUser.unbond(2)).to.not.be.reverted;
+
+        const tx = await stakingUser.cancelUnbondingAll();
+        const receipt = await tx.wait();
+
+        const cancelEvents = await receipt.events?.filter((e) => e.event === "CancelUnbond");
+        expect(cancelEvents?.length === 2);
+
+        // Check all stakes match original
+        let stake = await stakingUser.stakes(user.address, 0);
+        let boostMultiplier = stakeAmount.mul(await stakingUser.ONE_DAY_BOOST()).div(ether("1"));
+        let expectedAmountWithBoost = stakeAmount.add(boostMultiplier);
+
+        expect(stake.amount).to.equal(stakeAmount);
+        expect(stake.amountWithBoost).to.equal(expectedAmountWithBoost);
+        expect(stake.unbondTimestamp).to.equal(0);
+        expect(stake.lock).to.equal(lockDay);
+
+        stake = await stakingUser.stakes(user.address, 1);
+        boostMultiplier = stakeAmount.mul(await stakingUser.ONE_WEEK_BOOST()).div(ether("1"));
+        expectedAmountWithBoost = stakeAmount.add(boostMultiplier);
+
+        expect(stake.amount).to.equal(stakeAmount);
+        expect(stake.amountWithBoost).to.equal(expectedAmountWithBoost);
+        expect(stake.unbondTimestamp).to.equal(0);
+        expect(stake.lock).to.equal(lockWeek);
+
+        stake = await stakingUser.stakes(user.address, 2);
+        boostMultiplier = stakeAmount.mul(await stakingUser.TWO_WEEKS_BOOST()).div(ether("1"));
+        expectedAmountWithBoost = stakeAmount.add(boostMultiplier);
+
+        expect(stake.amount).to.equal(stakeAmount);
+        expect(stake.amountWithBoost).to.equal(expectedAmountWithBoost);
+        expect(stake.unbondTimestamp).to.equal(0);
+        expect(stake.lock).to.equal(lockTwoWeeks);
+      });
+    });
+
     describe("unstake", () => {
       const rewardPerEpoch = ether(oneWeekSec.toString());
       const stakeAmount = ether("1000");
@@ -364,13 +623,9 @@ describe("CellarStaking", () => {
       beforeEach(async () => {
         await ctx.staking.setRewardsDuration(oneWeekSec);
 
-        await ethers.provider.send("evm_setAutomine", [false]);
-
         await ctx.staking.notifyRewardAmount(rewardPerEpoch);
         await ctx.stakingUser.stake(stakeAmount, lockDay);
 
-        await ethers.provider.send("evm_mine", []);
-        await ethers.provider.send("evm_setAutomine", [true]);
       });
 
       it("should revert if passed an out of bounds deposit id", async () => {
@@ -380,6 +635,30 @@ describe("CellarStaking", () => {
 
       it("should not allow unstaking a stake that is still locked", async () => {
         const { stakingUser } = ctx;
+        await expect(stakingUser.unstake(0)).to.be.revertedWith("USR_StakeLocked");
+      });
+
+      it("should not allow unstaking if the unbonding period has not expired", async () => {
+        const { stakingUser, user } = ctx;
+
+        await increaseTime(oneWeekSec);
+
+        // Unbond one stake
+        await expect(stakingUser.unbond(0))
+          .to.emit(stakingUser, "Unbond")
+          .withArgs(user.address, 0, stakeAmount);
+
+        // Check updated stake
+        const updatedStake = await stakingUser.stakes(user.address, 0);
+        const latestBlock = await ethers.provider.getBlock("latest");
+
+        expect(updatedStake.amount).to.equal(stakeAmount);
+        expect(updatedStake.amountWithBoost).to.equal(stakeAmount);
+        expect(updatedStake.unbondTimestamp).to.equal(latestBlock.timestamp + oneDaySec);
+        expect(updatedStake.lock).to.equal(lockDay);
+
+        // try to very soon after unstake
+        await increaseTime(1000);
         await expect(stakingUser.unstake(0)).to.be.revertedWith("USR_StakeLocked");
       });
 
@@ -394,7 +673,16 @@ describe("CellarStaking", () => {
         const stake = await stakingUser.stakes(user.address, 0);
         await setNextBlockTimestamp(stake.unbondTimestamp.toNumber() + 1);
 
-        await stakingUser.unstake(0);
+        const tx = await stakingUser.unstake(0);
+        const receipt = await tx.wait();
+
+        const unstakeEvent = receipt.events?.find(e => e.event === "Unstake");
+
+        expect(unstakeEvent).to.not.be.undefined;
+        expect(unstakeEvent?.args?.[0]).to.equal(user.address);
+        expect(unstakeEvent?.args?.[1]).to.equal(0);
+        expect(unstakeEvent?.args?.[2]).to.equal(stakeAmount);
+        expectRoundedEqual(unstakeEvent?.args?.[3], rewardPerEpoch);
 
         // single staker takes all rewards
         const bal = await tokenDist.balanceOf(user.address);
@@ -441,7 +729,7 @@ describe("CellarStaking", () => {
       });
     });
 
-    describe.only("unstakeAll", () => {
+    describe("unstakeAll", () => {
       const rewardPerEpoch = ether(String(2_000_000)); // 2M
       const stakeAmount = ether("50000");
 
@@ -496,7 +784,7 @@ describe("CellarStaking", () => {
       });
     });
 
-    describe.skip("claim", () => {
+    describe("claim", () => {
       describe("uninitialized", () => {
         it("should not allow claiming if the rewards are not initialized");
       });
@@ -524,7 +812,6 @@ describe("CellarStaking", () => {
 
     describe("claimAll", () => {
       it("should claim all available rewards for all deposits, within the same epoch");
-      it("should claim all available rewards for all deposits, across multiple epochs");
     });
 
     // describe("emergencyUnstake", () => {
