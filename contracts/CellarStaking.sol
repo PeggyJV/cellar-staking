@@ -9,10 +9,6 @@ import "./Errors.sol";
 import "./interfaces/ICellarStaking.sol";
 import "hardhat/console.sol";
 
-// TODO:
-// Fix tests
-// Fix docs
-
 /**
  * @title Sommelier Staking
  * @author Kevin Kennis
@@ -165,7 +161,6 @@ contract CellarStaking is ICellarStaking, Ownable {
     /// @notice user => depositId[]
     mapping(address => uint256[]) public allUserStakes;
     /// @notice user => depositId => index in allUserStakes
-    // TODO: try to remove this
     mapping(address => mapping(uint256 => uint256)) public depositIdIdx;
     /// @notice user => current index of user deposit array
     mapping(address => uint256) public currentUserDepositIdx;
