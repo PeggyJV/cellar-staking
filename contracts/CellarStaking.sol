@@ -21,18 +21,23 @@ import "hardhat/console.sol";
  *
  * This contract is inspired by the Synthetix staking rewards contract, Ampleforth's
  * token geyser, and Treasure DAO's MAGIC mine. However, there are unique improvements
- * and new features, specifically the epoch design. The reward epoch design allows
- * for flexible definition of multi-step staking programs, such as designs where
- * rewards 'halve' every certain number of epochs.
+ * and new features, specifically unbonding, as inspired by LP bonding on Osmosis.
+ * Unbonding allows the contract to guarantee deposits for a certain amount of time,
+ * increasing predictability and stickiness of TVL for Cellars.
  *
  * *********************************** Funding Flow ***********************************
  *
- * 1) The contract owner calls 'initializePool' to specify an initial schedule of reward
- *    epochs. The contract collects the distribution token from the owner to fund the
- *    specified reward schedule.
- * 2) At a future time, the contract owner may call 'replenishPool' to extend the staking
- *    program with new reward epochs. These new epochs may distribute more or less
- *    rewards than previous epochs.
+ * 1) The contract owner calls 'notifyRewardAmount' to specify an initial schedule of rewards
+ *    The contract collects the distribution token from the owner to fund the
+ *    specified reward schedule, where the length of the reward schedule is defined by
+ *    epochDuration. This duration can also be changed by the owner, and any change will apply
+ *    to future calls to 'notifyRewardAmount' (but will not affect active schedules).
+ * 2) At a future time, the contract owner may call 'notifyRewardAmount' again to extend the
+ *    staking program with new rewards. These new schedules may distribute more or less
+ *    rewards than previous epochs. If a previous epoch is not finished, any leftover rewards
+ *    get rolled into the new schedule, increasing the reward rate. Reward schedules always
+ *    end exactly 'epochDuration' seconds from the most recent time 'notifyRewardAmount' has been
+ *    called.
  *
  * ********************************* Staking Lifecycle ********************************
  *
@@ -43,7 +48,9 @@ import "hardhat/console.sol";
  *    may not unstake until they choose to unbond, and time defined by the lock has
  *    elapsed during unbonding.
  * 2) When a user wishes to withdraw, they must first "unbond" their stake, which starts
- *    a timer equivalent to the lock time.
+ *    a timer equivalent to the lock time. They still receive their rewards during this
+ *    time, but forfeit any locktime boosts. A user may cancel the unbonding period at any
+ *    time to regain their boosts, which will set the unbonding timer back to 0.
  * 2) Once the lock has elapsed, a user may unstake their deposit, either partially
  *    or in full. The user will continue to receive the same 'boosted' amount of rewards
  *    until they unstake. The user may unstake all of their deposits at once, as long
@@ -56,40 +63,50 @@ import "hardhat/console.sol";
  *
  * ************************************ Accounting ************************************
  *
- * The contract uses an accounting mechanism based on the 'share-seconds' model,
- * originated by the Ampleforth token geyser. First, token deposits are accounted
- * for as staking shares, which represent a proportional interest in total deposits,
- * and acount for the 'boost' defined by locks.
+ * The contract uses an accounting mechanism based on the 'rewardPerToken' model,
+ * originated by the Synthetix staking rewards contract. First, token deposits are accounted
+ * for, with synthetic "boosted" amounts used for reward calculations. As time passes,
+ * rewardPerToken continues to accumulate, whereas the value of 'rewardPerToken' will match
+ * the reward due to a single token deposited before the first ever rewards were scheduled.
  *
- * At each accounting checkpoint, every active share will accumulate 'share-seconds',
- * which is the number of seconds a given share has been deposited into the staking
- * program. Every reward epoch will accumulate share-seconds based on how many shares
- * were deposited and when they were deposited. The following example applies to
- * a given epoch of 100 seconds:
+ * At each accounting checkpoint, rewardPerToken will be recalculated, and every time an
+ * existing stake is 'touched', this value is used to calculate earned rewards for that
+ * stake. Each stake tracks a 'rewardPerTokenPaid' value, which represents the 'rewardPerToken'
+ * value the last time the stake calculated "earned" rewards. Every recalculation pays the difference.
+ * This ensures no earning is double-counted. When a new stake is deposited, its
+ * initial 'rewardPerTokenPaid' is set to the current 'rewardPerToken' in the contract,
+ * ensuring it will not receive any rewards emitted during the period before deposit.
  *
- * a) User 1 deposits 50 shares before the epoch begins
- * b) User 2 deposits 20 shares at second 20 of the epoch
- * c) User 3 deposits 100 shares at second 50 of the epoch
+ * The following example applies to a given epoch of 100 seconds, with a reward rate
+ * of 100 tokens per second:
+ *
+ * a) User 1 deposits a stake of 50 before the epoch begins
+ * b) User 2 deposits a stake of 20 at second 20 of the epoch
+ * c) User 3 deposits a stake of 100 at second 50 of the epoch
  *
  * In this case,
  *
- * a) User 1 will accumulate 5000 share-seconds (50 shares * 100 seconds)
- * b) User 2 will accumulate 3200 share-seconds (20 shares * 80 seconds)
- * c) User 3 will accumulate 5000 share-seconds (100 shares * 50 seconds)
+ * a) At second 20, before User 2's deposit, rewardPerToken will be 40
+ *     (2000 total tokens emitted over 20 seconds / 50 staked).
+ * b) At second 50, before User 3's deposit, rewardPerToken will be 82.857
+ *     (previous 40 + 3000 tokens emitted over 30 seconds / 70 staked == 42.857)
+ * c) At second 100, when the period is over, rewardPerToken will be 112.267
+ *     (previous 82.857 + 5000 tokens emitted over 50 seconds / 170 staked == 29.41)
  *
- * So the total accumulated share-seconds will be 5000 + 3200 + 5000 = 13200.
- * Then, each user will receive rewards proportional to the total from the
- * predefined reward pool for the epoch. In this scenario, User 1 and User 3
- * will receive approximately 37.88% of the total rewards, and User 2 will
- * receive approximately 24.24% of the total rewards.
+ *
+ * Then, each user will receive rewards proportional to the their number of tokens.
+ * a) User 1 will receive 50 * 112.267 = 5613.35 rewards
+ * b) User 2 will receive 20 * (112.267 - 40) = 1445.34
+ *       (40 is deducted because it was the current rewardPerToken value on deposit)
+ * c) User 3 will receive 100 * (112.267 - 82.857) = 2941
+ *       (82.857 is deducted because it was the current rewardPerToken value on deposit)
  *
  * Depending on deposit times, this accumulation may take place over multiple
- * epochs, and the total rewards earned is simply the sum of rewards earned for
- * each epoch. A user may also have multiple discrete deposits, which are all
+ * reward periods, and the total rewards earned is simply the sum of rewards earned for
+ * each period. A user may also have multiple discrete deposits, which are all
  * accounted for separately due to timelocks and locking boosts. Therefore,
  * a user's total earned rewards are a function of their rewards across
- * the proportional share-seconds accumulated for each staking epoch, across
- * all epochs for which all user stakes were deposited.
+ * the proportional tokens deposited, across different ranges of rewardPerToken.
  *
  * Reward accounting takes place before every operation which may change
  * accounting calculations (minting of new shares on staking, burning of
@@ -99,7 +116,6 @@ import "hardhat/console.sol";
  * amount of storage of historical state. On every accounting run, there
  * are a number of safety checks to ensure that all reward tokens are
  * accounted for and that no accounting time periods have been missed.
- *
  *
  */
 contract CellarStaking is ICellarStaking, Ownable {
