@@ -12,7 +12,7 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 interface ICellarStaking {
     // ===================== Events =======================
 
-    event Funding(address stakingToken, address distributionToken, uint256 rewardAmount);
+    event Funding(uint256 rewardAmount, uint256 rewardEnd);
     event Stake(address indexed user, uint256 depositId, uint256 amount);
     event Unbond(address indexed user, uint256 depositId, uint256 amount);
     event CancelUnbond(address indexed user, uint256 depositId);

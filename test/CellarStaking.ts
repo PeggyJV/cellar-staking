@@ -1328,63 +1328,118 @@ describe("CellarStaking", () => {
     });
   });
 
-  // describe("Admin Operations", () => {
-  //   describe("initializePool", () => {
-  //     it("should revert if caller is not the owner");
-  //     it("should revert if the contract is paused");
-  //     it("should revert if the staking pool has previously been initialized");
-  //     it("should revert if the number of epochs is 0");
-  //     it("should revert if the number of epochs is more than the maximum");
-  //     it("should revert if the epoch length is 0");
-  //     it("should revert if the rewards per epoch is 0");
-  //     it("should revert if the owner cannot fund the reward epochs");
-  //     it("should create new reward epochs and store them in contract state");
-  //   });
-  //
-  //   describe("replenishPool", () => {
-  //     it("should revert if caller is not the owner");
-  //     it("should revert if the contract is paused");
-  //     it("should revert if the staking pool has not previously been initialized");
-  //     it("should revert if the number of new epochs is 0");
-  //     it("should revert if the number of new epochs plus previous epochs is more than the maximum");
-  //     it("should revert if the epoch length is 0");
-  //     it("should revert if the rewards per epoch is 0");
-  //     it("should revert if the owner cannot fund the new reward epochs");
-  //     it("should create new reward epochs and store them in contract state, appending to existing state");
-  //   });
-  //
-  //   describe("updateMinimumDeposit", () => {
-  //     it("should revert if caller is not the owner");
-  //     it("should set a new minimum staking deposit and immediately enforce it");
-  //   });
-  //
-  //   describe("setPaused", () => {
-  //     it("should revert if caller is not the owner");
-  //     it("should pause the contract");
-  //     it("should unpause the contract");
-  //   });
-  //
-  //   describe("emergencyStop", () => {
-  //     it("should revert if caller is not the owner");
-  //     it("should end the contract while making rewards claimable");
-  //     it("should end the contract and return distribution tokens if rewards are not claimable");
-  //     it("should revert if called more than once");
-  //   });
-  // });
-  //
+  describe.only("Admin Operations", () => {
+    describe("notifyRewardAmount", () => {
+      let distributor: SignerWithAddress;
+      let stakingDist: CellarStaking;
+
+      beforeEach(async () => {
+        const totalRewards = ether(String(20_000_000));
+
+        distributor = ctx.signers[5];
+        await ctx.tokenDist.mint(distributor.address, totalRewards);
+        await ctx.tokenDist.approve(ctx.staking.address, totalRewards);
+
+        await ctx.staking.setRewardsDistribution(distributor.address);
+
+        stakingDist = await ctx.connectUser(distributor);
+      });
+
+      it("should revert if caller is not the reward distributor", async () => {
+        const { stakingUser } = ctx;
+
+        await expect(stakingUser.notifyRewardAmount(ether("100"))).to.be.revertedWith("USR_NotDistributor");
+      });
+
+      it("should revert if caller is the owner but not the reward distributor", async () => {
+        const { staking } = ctx;
+
+        await expect(staking.notifyRewardAmount(ether("100"))).to.be.revertedWith("USR_NotDistributor");
+      });
+
+      it("should revert if the the reward is less than one base unit per second", async () => {
+        await expect(stakingDist.notifyRewardAmount(1)).to.be.revertedWith("USR_ZeroRewardsPerEpoch");
+      });
+
+      it("should revert if the the reward amount may cause overflow", async () => {
+        const largeAmount = ether("1").mul(BigNumber.from(10).pow(50));
+
+        await expect(stakingDist.notifyRewardAmount(largeAmount)).to.be.revertedWith("USR_RewardTooLarge");
+      });
+
+      it("should schedule new rewards", async () => {
+        const { tokenDist } = ctx;
+
+        // Equates to one unit per second distributed
+        const rewards = ether(oneMonthSec.toString());
+        const balanceBefore = await tokenDist.balanceOf(distributor.address);
+
+        const tx = await stakingDist.notifyRewardAmount(rewards);
+        const receipt = await tx.wait();
+        const latestBlock = await ethers.provider.getBlock("latest");
+
+        const fundingEvent = receipt.events?.find(e => e.event === "Funding");
+
+        expect(fundingEvent).to.not.be.undefined;
+        expect(fundingEvent?.args?.[0]).to.equal(rewards);
+        expect(fundingEvent?.args?.[1]).to.equal(latestBlock.timestamp + oneMonthSec);
+
+        // Check reward rate, end timestamp, and balances
+        expect(await stakingDist.rewardRate).to.equal(ether("1"));
+        expect(await stakingDist.endTimestamp).to.equal(latestBlock.timestamp + oneMonthSec);
+        expect(await tokenDist.balanceOf(stakingDist.address)).to.equal(rewards);
+
+        const balanceAfter = await tokenDist.balanceOf(distributor.address);
+
+        expect(balanceBefore.sub(balanceAfter)).to.equal(rewards);
+      });
+
+      it("should update and extend existing schedule");
+    });
+
+    describe("setRewardsDistribution", () => {
+      it("should revert if caller is not the owner");
+      it("should update the reward distributor");
+    });
+
+    describe("setRewardsDuration", () => {
+      it("should revert if caller is not the owner");
+      it("should revert if a current reward period is ongoing");
+      it("should update the reward epoch duration");
+    });
+
+    describe("updateMinimumDeposit", () => {
+      it("should revert if caller is not the owner");
+      it("should set a new minimum staking deposit and immediately enforce it");
+    });
+
+    describe("setPaused", () => {
+      it("should revert if caller is not the owner");
+      it("should pause the contract");
+      it("should unpause the contract");
+    });
+
+    describe("emergencyStop", () => {
+      it("should revert if caller is not the owner");
+      it("should end the contract while making rewards claimable");
+      it("should end the contract and return distribution tokens if rewards are not claimable");
+      it("should revert if called more than once");
+    });
+  });
+
   // describe("State Information", () => {
   //   describe("currentEpoch", () => {
   //     it("should report the correct epoch for the current time");
   //     it("should revert if there is no active epoch");
   //   });
-  //
+
   //   describe("epochAtTime", () => {
   //     it("should report the correct epoch for the specified time");
   //     it("should revert if there is no active epoch at the time specified");
   //   });
-  //
+
   //   describe("totalRewards", () => {
   //     it("should report the total rewards scheduled across all epochs");
   //   });
-  //   });
+  // });
 });

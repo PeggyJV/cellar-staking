@@ -609,7 +609,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         // Source rewards
         distributionToken.safeTransferFrom(rewardsDistribution, address(this), reward);
 
-        emit Funding(address(stakingToken), address(distributionToken), reward);
+        emit Funding(reward, endTimestamp);
     }
 
     /**
