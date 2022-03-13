@@ -6,6 +6,7 @@
 [X] Create Error objects
 [X] Handle accounting after last epoch
 [X] Pull interface out and add natspec documentation
+[] Write advanced test scenarios
 [] Write README
 [] Write deploy script
 [] Write mainnet fork integration test script (using deploy)
