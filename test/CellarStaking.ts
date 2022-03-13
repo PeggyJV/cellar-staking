@@ -8,6 +8,7 @@ const { loadFixture } = waffle;
 import type { CellarStaking } from "../src/types/CellarStaking";
 import type { MockERC20 } from "../src/types/MockERC20";
 import { ether, deploy, increaseTime, rand, setNextBlockTimestamp, expectRoundedEqual } from "./utils";
+import { Block } from "@ethersproject/providers";
 
 interface TestContext {
   admin: SignerWithAddress;
@@ -1660,21 +1661,157 @@ describe("CellarStaking", () => {
     });
   });
 
-  // describe("State Information", () => {
-  //   describe("currentEpoch", () => {
-  //     it("should report the correct epoch for the current time");
-  //     it("should revert if there is no active epoch");
-  //   });
+  describe("State Information", () => {
+    describe("latestRewardsTimestamp", () => {
+      let latestBlock: Block;
 
-  //   describe("epochAtTime", () => {
-  //     it("should report the correct epoch for the specified time");
-  //     it("should revert if there is no active epoch at the time specified");
-  //   });
+      beforeEach(async () => {
+        await ctx.staking.notifyRewardAmount(oneMonthSec);
+        latestBlock = await ethers.provider.getBlock("latest");
+      });
 
-  //   describe("totalRewards", () => {
-  //     it("should report the total rewards scheduled across all epochs");
-  //   });
-  // });
+      it("should report the latest block timestamp if rewards are ongoing", async () => {
+        const { staking } = ctx;
+
+        expect(await staking.latestRewardsTimestamp()).to.equal(latestBlock.timestamp);
+      });
+
+      it("should report the ending timestamp of the rewards period if the period has ended", async () => {
+        const { staking } = ctx;
+
+        // Move past rewards end
+        await increaseTime(latestBlock.timestamp + oneMonthSec * 2);
+
+        expect(await staking.latestRewardsTimestamp()).to.equal(latestBlock.timestamp + oneMonthSec);
+      });
+    });
+
+    describe("rewardPerToken", () => {
+      let latestBlock: Block;
+      let stakeAmount: BigNumber;
+
+      beforeEach(async () => {
+        stakeAmount = ether(oneMonthSec.toString());
+
+        await ctx.staking.notifyRewardAmount(stakeAmount);
+        latestBlock = await ethers.provider.getBlock("latest");
+      });
+
+      it("reports the latest rewards per deposited token", async () => {
+        const { stakingUser } = ctx;
+        // Deposit 50% of total rewards - will be equal after boost
+        await stakingUser.stake(BigNumber.from(oneMonthSec).div(2), lockTwoWeeks);
+
+        // Move halfway through
+        await setNextBlockTimestamp(latestBlock.timestamp + oneMonthSec / 2);
+
+        // Half rewards distributed, which means that .5 tokens dist per deposited token
+        // Need to divide by one ether since zeroes are added for precision
+        const rewardPerToken = (await stakingUser.rewardPerToken()).div(ether("1"));
+        expectRoundedEqual(rewardPerToken, ether(".5"));
+      });
+
+      it("reports the last calculated rewards per token if there are no deposits", async () => {
+        const { stakingUser } = ctx;
+        // Deposit 71.43% of total rewards - will be equal after boost
+        await stakingUser.stake(BigNumber.from(oneMonthSec).div(10000).mul(7143), lockWeek);
+        await stakingUser.unbondAll();
+
+        // Move halfway through
+        await setNextBlockTimestamp(latestBlock.timestamp + oneMonthSec / 2);
+        await stakingUser.unstake(0);
+
+        // Get reward per tokenStored
+        const rewardPerToken = (await stakingUser.rewardPerToken());
+        const rewardPerTokenStored = await stakingUser.rewardPerTokenStored();
+
+        expect(rewardPerToken).to.equal(rewardPerTokenStored);
+
+        // Move forward
+        await increaseTime(oneMonthSec);
+
+        // Check again
+        const newRewardPerToken = (await stakingUser.rewardPerToken());
+        const newRewardPerTokenStored = await stakingUser.rewardPerTokenStored();
+
+        expect(rewardPerTokenStored).to.equal(newRewardPerTokenStored);
+        expect(newRewardPerToken).to.equal(newRewardPerTokenStored);
+      });
+    });
+
+    describe("stake information", () => {
+      const rewardPerEpoch = ether(oneWeekSec.toString());
+      const stakeAmount = ether("1000");
+
+      beforeEach(async () => {
+        await ctx.staking.setRewardsDuration(oneWeekSec);
+        await ctx.staking.notifyRewardAmount(rewardPerEpoch);
+
+        await ctx.stakingUser.stake(stakeAmount, lockDay);
+        await ctx.stakingUser.stake(stakeAmount.mul(2), lockWeek);
+        await ctx.stakingUser.stake(stakeAmount.mul(3), lockTwoWeeks);
+      });
+
+      it("should report the details of a single stake", async () => {
+        const { stakingUser, user } = ctx;
+
+        const stake1 = await stakingUser.getUserStake(user.address, 0);
+        let boostMultiplier = stakeAmount.mul(await stakingUser.ONE_DAY_BOOST()).div(ether("1"));
+        let expectedAmountWithBoost = stakeAmount.add(boostMultiplier);
+
+        expect(stake1.amount).to.equal(stakeAmount);
+        expect(stake1.amountWithBoost).to.equal(expectedAmountWithBoost);
+        expect(stake1.rewards).to.equal(0);
+        expect(stake1.unbondTimestamp).to.equal(0);
+        expect(stake1.lock).to.equal(lockDay);
+
+        const stake2 = await stakingUser.getUserStake(user.address, 1);
+        boostMultiplier = stakeAmount.mul(2).mul(await stakingUser.ONE_WEEK_BOOST()).div(ether("1"));
+        expectedAmountWithBoost = stakeAmount.mul(2).add(boostMultiplier);
+
+        expect(stake2.amount).to.equal(stakeAmount.mul(2));
+        expect(stake2.amountWithBoost).to.equal(expectedAmountWithBoost);
+        expect(stake2.rewards).to.equal(0);
+        expect(stake2.unbondTimestamp).to.equal(0);
+        expect(stake2.lock).to.equal(lockWeek);
+
+        const stake3 = await stakingUser.getUserStake(user.address, 2);
+        boostMultiplier = stakeAmount.mul(3).mul(await stakingUser.TWO_WEEKS_BOOST()).div(ether("1"));
+        expectedAmountWithBoost = stakeAmount.mul(3).add(boostMultiplier);
+
+        expect(stake3.amount).to.equal(stakeAmount.mul(3));
+        expect(stake3.amountWithBoost).to.equal(expectedAmountWithBoost);
+        expect(stake3.rewards).to.equal(0);
+        expect(stake3.unbondTimestamp).to.equal(0);
+        expect(stake3.lock).to.equal(lockTwoWeeks);
+      });
+
+      it("should report all stakes for a user", async () => {
+        const { stakingUser, user } = ctx;
+
+        const stakes = await stakingUser.getAllUserStakes(user.address);
+
+        expect(stakes.length).to.equal(3);
+        expect(stakes[0]).to.equal(0);
+        expect(stakes[1]).to.equal(1);
+        expect(stakes[2]).to.equal(2);
+      });
+
+      it("should report the correct index for a user stake", async () => {
+        const { stakingUser, user } = ctx;
+
+        expect(await stakingUser.getDepositIdIdx(user.address, 0)).to.equal(0);
+        expect(await stakingUser.getDepositIdIdx(user.address, 1)).to.equal(1);
+        expect(await stakingUser.getDepositIdIdx(user.address, 2)).to.equal(2);
+      });
+
+      it("should report the latest deposit ID for a user", async () => {
+        const { stakingUser, user } = ctx;
+
+        expect(await stakingUser.getCurrentUserDepositIdx(user.address)).to.equal(3);
+      });
+    });
+  });
 });
 
 /**

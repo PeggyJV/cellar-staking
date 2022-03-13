@@ -111,10 +111,6 @@ interface ICellarStaking {
 
     function rewardPerToken() external view returns (uint256);
 
-    function pendingRewards(address user, uint256 depositId) external view returns (uint256 reward);
-
-    function pendingRewardsAll(address user) external view returns (uint256 reward);
-
     function getUserStake(address user, uint256 depositId) external returns (UserStake memory);
 
     function getAllUserStakes(address user) external returns (uint256[] memory);

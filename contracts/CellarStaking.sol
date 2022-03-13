@@ -710,31 +710,6 @@ contract CellarStaking is ICellarStaking, Ownable {
     }
 
     /**
-     * @notice Returns how much rewards a user has earned for a staker.
-     *
-     * @param user                      The user to check rewards for.
-     * @param depositId                 The deposit ID to check rewards for
-     *
-     * @return reward                   The amount of tokens claimable.
-     */
-    function pendingRewards(address user, uint256 depositId) public view override returns (uint256 reward) {
-         reward = _earned(getUserStake(user, depositId));
-    }
-
-    /**
-     * @notice Returns how much rewards a user has earned for a staker.
-     *
-     * @param user                      The user to check rewards for.
-     *
-     * @return reward                   The amount of tokens claimable.
-     */
-    function pendingRewardsAll(address user) public view override returns (uint256 reward) {
-        for (uint256 i = 0; i < currentUserDepositIdx[user]; i++) {
-            reward += _earned(getUserStake(user, allUserStakes[user][i]));
-        }
-    }
-
-    /**
      * @notice Returns user stake info.
      * @dev    Used to circumvent limitations around returning nested mappings.
      *
