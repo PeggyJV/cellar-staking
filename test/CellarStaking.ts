@@ -27,7 +27,6 @@ const oneMonthSec = oneDaySec * 30;
 describe("CellarStaking", () => {
   let ctx: TestContext;
   const initialTokenAmount = ether("20000000"); // 20M
-  let startTimestamp: number;
 
   // Lock enum
   const lockDay = 0;
@@ -99,7 +98,7 @@ describe("CellarStaking", () => {
 
       it("should not allow a user to stake if there are no rewards left", async () => {
         const { stakingUser } = ctx;
-        await increaseTime(oneMonthSec * 2); // epoch has not completed
+        await increaseTime(oneMonthSec * 2); // roll past reward time completion
 
         await expect(stakingUser.stake(ether("1"), lockDay)).to.be.revertedWith("STATE_NoRewardsLeft");
       });
@@ -107,6 +106,13 @@ describe("CellarStaking", () => {
       it("should not allow a user to stake if the amount is zero", async () => {
         const { stakingUser } = ctx;
         await expect(stakingUser.stake(0, lockDay)).to.be.revertedWith("USR_ZeroDeposit");
+      });
+
+      it("should not allow a user to stake if the contract is paused", async () => {
+        const { staking, stakingUser } = ctx;
+
+        await staking.setPaused(true);
+        await expect(stakingUser.stake(ether("1"), lockDay)).to.be.revertedWith("STATE_ContractPaused");
       });
 
       it("should revert for an invalid lock value", async () => {
@@ -423,6 +429,13 @@ describe("CellarStaking", () => {
         await expect(stakingUser.unbond(0)).to.be.revertedWith("USR_AlreadyUnbonding");
       });
 
+      it("should not allow a user to unbond if the contract is paused", async () => {
+        const { staking, stakingUser } = ctx;
+
+        await staking.setPaused(true);
+        await expect(stakingUser.unbond(0)).to.be.revertedWith("STATE_ContractPaused");
+      });
+
       it("should unbond a stake and remove any boosts", async () => {
         const { stakingUser, user } = ctx;
 
@@ -452,6 +465,22 @@ describe("CellarStaking", () => {
     describe("unbondAll", () => {
       const rewardPerEpoch = ether(oneWeekSec.toString());
       const stakeAmount = ether("1000");
+
+      it("should not allow a user to unbond all stakes if the contract is paused", async () => {
+        const { staking, stakingUser } = ctx;
+
+        await staking.setRewardsDuration(oneWeekSec);
+
+        await staking.notifyRewardAmount(rewardPerEpoch);
+        await stakingUser.stake(stakeAmount, lockDay);
+
+        // Stake again
+        await stakingUser.stake(stakeAmount.mul(2), lockWeek);
+        await stakingUser.stake(stakeAmount.mul(3), lockTwoWeeks);
+
+        await staking.setPaused(true);
+        await expect(stakingUser.unbondAll()).to.be.revertedWith("STATE_ContractPaused");
+      });
 
       it("should unbond all stakes, skipping ones that have already been unbonded", async () => {
         const { staking, stakingUser, user } = ctx;
@@ -524,6 +553,15 @@ describe("CellarStaking", () => {
         await expect(stakingUser.cancelUnbonding(0)).to.be.revertedWith("USR_NotUnbonding");
       });
 
+      it("should not allow a user to cancel unbonding if the contract is paused", async () => {
+        const { staking, stakingUser } = ctx;
+
+        await expect(stakingUser.unbond(0)).to.not.be.reverted;
+
+        await staking.setPaused(true);
+        await expect(stakingUser.cancelUnbonding(0)).to.be.revertedWith("STATE_ContractPaused");
+      });
+
       it("should cancel unbonding for a stake and reinstate any boosts", async () => {
         const { stakingUser, user } = ctx;
 
@@ -563,6 +601,26 @@ describe("CellarStaking", () => {
     describe("cancelUnbondingAll", () => {
       const rewardPerEpoch = ether(oneWeekSec.toString());
       const stakeAmount = ether("1000");
+
+      it("should not allow a user to cancel unbonding if the contract is paused", async () => {
+        const { staking, stakingUser } = ctx;
+
+        await staking.setRewardsDuration(oneWeekSec);
+
+        await staking.notifyRewardAmount(rewardPerEpoch);
+        await stakingUser.stake(stakeAmount, lockDay);
+
+        // Stake again
+        await stakingUser.stake(stakeAmount, lockWeek);
+        await stakingUser.stake(stakeAmount, lockTwoWeeks);
+
+        // Unbond two stakes
+        await expect(stakingUser.unbond(1)).to.not.be.reverted;
+        await expect(stakingUser.unbond(2)).to.not.be.reverted;
+
+        await staking.setPaused(true);
+        await expect(stakingUser.cancelUnbondingAll()).to.be.revertedWith("STATE_ContractPaused");
+      });
 
       it("should cancel unbonding all stakes, skipping ones that are not unbonding", async () => {
         const { staking, stakingUser, user } = ctx;
@@ -636,6 +694,15 @@ describe("CellarStaking", () => {
       it("should not allow unstaking a stake that is still locked", async () => {
         const { stakingUser } = ctx;
         await expect(stakingUser.unstake(0)).to.be.revertedWith("USR_StakeLocked");
+      });
+
+      it("should not allow a user to unstake if the contract is paused", async () => {
+        const { staking, stakingUser } = ctx;
+
+        await expect(stakingUser.unbond(0)).to.not.be.reverted;
+
+        await staking.setPaused(true);
+        await expect(stakingUser.unstake(0)).to.be.revertedWith("STATE_ContractPaused");
       });
 
       it("should not allow unstaking if the unbonding period has not expired", async () => {
@@ -737,6 +804,26 @@ describe("CellarStaking", () => {
         await ctx.staking.setRewardsDuration(oneWeekSec * 3);
         await ctx.staking.notifyRewardAmount(rewardPerEpoch.mul(3));
         await ctx.stakingUser.stake(stakeAmount, lockDay);
+      });
+
+      it("should not allow a user to unstake all stakes if the contract is paused", async () => {
+        const { staking, stakingUser } = ctx;
+
+        await stakingUser.stake(stakeAmount, lockDay);
+
+        // Stake again
+        await stakingUser.stake(stakeAmount, lockWeek);
+        await stakingUser.stake(stakeAmount, lockTwoWeeks);
+
+        // Unbond two stakes
+        await expect(stakingUser.unbond(1)).to.not.be.reverted;
+        await expect(stakingUser.unbond(2)).to.not.be.reverted;
+
+        // End rewards
+        await increaseTime(oneWeekSec * 3);
+
+        await staking.setPaused(true);
+        await expect(stakingUser.unstakeAll()).to.be.revertedWith("STATE_ContractPaused");
       });
 
       it("should unstake all amounts for all deposits, and distribute all available rewards", async () => {
@@ -1007,11 +1094,7 @@ describe("CellarStaking", () => {
         const receipt = await tx.wait();
 
         const claimEvent = receipt.events?.find(e => e.event === "Claim");
-
-        expect(claimEvent).to.not.be.undefined;
-        expect(claimEvent?.args?.[0]).to.equal(user.address);
-        expect(claimEvent?.args?.[1]).to.equal(0);
-        expect(claimEvent?.args?.[2]).to.equal(0);
+        expect(claimEvent).to.be.undefined;
 
         // No rewards claimed
         expect(await tokenDist.balanceOf(user.address)).to.equal(balanceAfter);
@@ -1060,62 +1143,189 @@ describe("CellarStaking", () => {
       });
     });
 
-    // describe("emergencyUnstake", () => {
-    //   beforeEach(async () => {
-    //     await ctx.staking.initializePool(1, oneWeekSec);
-    //   });
+    describe("emergencyUnstake", () => {
+      const rewardPerEpoch = ether(oneWeekSec.toString());
 
-    //   it("should revert if the staking program has not been ended", async () => {
-    //     const { stakingUser } = ctx;
+      beforeEach(async () => {
+        await ctx.staking.setRewardsDuration(oneWeekSec);
+        await ctx.staking.notifyRewardAmount(rewardPerEpoch);
+      });
 
-    //     await expect(stakingUser.emergencyUnstake()).to.be.revertedWith("STATE_NoEmergencyUnstake");
-    //   });
+      it("should revert if the staking program has not been ended", async () => {
+        const { stakingUser } = ctx;
 
-    //   it("should return all staked tokens, across multiple stakes, regardless of lock status", async () => {
-    //     const { connectUser, signers, staking, stakingUser, tokenStake, user } = ctx;
-    //     await stakingUser.stake(initialTokenAmount, lockDay);
-    //     expect(await tokenStake.balanceOf(user.address)).to.equal(0);
+        await expect(stakingUser.emergencyUnstake()).to.be.revertedWith("STATE_NoEmergencyUnstake");
+      });
 
-    //     const user2 = signers[2];
-    //     const stakingUser2 = await connectUser(user2);
-    //     await stakingUser2.stake(initialTokenAmount, lockWeek);
-    //     expect(await tokenStake.balanceOf(user2.address)).to.equal(0);
+      it("should return all staked tokens, across multiple stakes, regardless of lock status", async () => {
+        const { connectUser, signers, staking, stakingUser, tokenStake, user } = ctx;
+        await stakingUser.stake(initialTokenAmount, lockDay);
+        expect(await tokenStake.balanceOf(user.address)).to.equal(0);
 
-    //     const user3 = signers[3];
-    //     const stakingUser3 = await connectUser(user3);
-    //     await stakingUser3.stake(initialTokenAmount, lockTwoWeeks);
-    //     expect(await tokenStake.balanceOf(user3.address)).to.equal(0);
+        const user2 = signers[2];
+        const stakingUser2 = await connectUser(user2);
+        await stakingUser2.stake(initialTokenAmount, lockWeek);
+        expect(await tokenStake.balanceOf(user2.address)).to.equal(0);
 
-    //     await staking.emergencyStop(false);
-    //     await stakingUser.emergencyUnstake();
-    //     expect(await tokenStake.balanceOf(user.address)).to.equal(initialTokenAmount);
+        const user3 = signers[3];
+        const stakingUser3 = await connectUser(user3);
+        await stakingUser3.stake(initialTokenAmount, lockTwoWeeks);
+        expect(await tokenStake.balanceOf(user3.address)).to.equal(0);
 
-    //     await stakingUser2.emergencyUnstake();
-    //     expect(await tokenStake.balanceOf(user2.address)).to.equal(initialTokenAmount);
+        await expect(staking.emergencyStop(false))
+          .to.emit(staking, "EmergencyStop")
+          .withArgs(signers[0].address, false);
 
-    //     await stakingUser3.emergencyUnstake();
-    //     expect(await tokenStake.balanceOf(user3.address)).to.equal(initialTokenAmount);
-    //   });
+        await expect(stakingUser.emergencyUnstake())
+          .to.emit(stakingUser, "EmergencyUnstake")
+          .withArgs(user.address, 0, initialTokenAmount);
+        expect(await tokenStake.balanceOf(user.address)).to.equal(initialTokenAmount);
 
-    //   it("should allow rewards to be claimable");
-    // });
+        await expect(stakingUser2.emergencyUnstake())
+          .to.emit(stakingUser2, "EmergencyUnstake")
+          .withArgs(user2.address, 0, initialTokenAmount);
+        expect(await tokenStake.balanceOf(user2.address)).to.equal(initialTokenAmount);
 
-    // describe("emergencyClaim", () => {
-    //   it("should revert if the staking program has not been ended", async () => {
-    //     const { stakingUser } = ctx;
+        await expect(stakingUser3.emergencyUnstake())
+          .to.emit(stakingUser3, "EmergencyUnstake")
+          .withArgs(user3.address, 0, initialTokenAmount);
+        expect(await tokenStake.balanceOf(user3.address)).to.equal(initialTokenAmount);
+      });
 
-    //     await expect(stakingUser.emergencyClaim()).to.be.revertedWith("STATE_NoEmergencyUnstake");
-    //   });
+      it("should emergency unstake multiple stakes for the same user", async () => {
+        const { staking, stakingUser, tokenStake, user } = ctx;
+        const stakeAmount = initialTokenAmount.div(2);
 
-    //   it("should revert if the contract stopped with claim disabled", async () => {
-    //     const { staking, stakingUser } = ctx;
+        await stakingUser.stake(stakeAmount, lockDay);
+        await stakingUser.stake(stakeAmount, lockWeek);
 
-    //     await staking.emergencyStop(false);
-    //     await expect(stakingUser.emergencyClaim()).to.be.revertedWith("STATE_NoEmergencyClaim");
-    //   });
+        expect(await tokenStake.balanceOf(user.address)).to.equal(0);
 
-    //   it("should return all staked tokens and distribute all unclaimed rewards");
-    // });
+        await expect(staking.emergencyStop(false)).to.not.be.reverted;
+
+        const tx = await stakingUser.emergencyUnstake();
+        const receipt = await tx.wait();
+
+        const unstakeEvents = await receipt.events?.filter((e) => e.event === "Unbond");
+        expect(unstakeEvents?.length === 2);
+
+        for (const i in unstakeEvents!) {
+          const event = unstakeEvents[i];
+          expect(event?.args?.[0]).to.equal(user.address);
+          expect(event?.args?.[1]).to.equal(i);
+          expect(event?.args?.[2]).to.equal(stakeAmount);
+        }
+
+        expect(await tokenStake.balanceOf(user.address)).to.equal(initialTokenAmount);
+      });
+
+      it("should not allow users to claim rewards", async () => {
+        const { staking, stakingUser } = ctx;
+
+        await stakingUser.stake(initialTokenAmount, lockDay);
+        await expect(staking.emergencyStop(false)).to.not.be.reverted;
+
+        await stakingUser.emergencyUnstake();
+
+        // Try to claim rewards normally
+        await expect(stakingUser.claim(0)).to.be.revertedWith("STATE_ContractKilled");
+        await expect(stakingUser.claimAll()).to.be.revertedWith("STATE_ContractKilled");
+
+        // Try to claim rewards thru emergency
+        await expect(stakingUser.emergencyClaim()).to.be.revertedWith("STATE_NoEmergencyClaim");
+      });
+
+      it("should allow rewards to be claimable", async () => {
+        const { staking, stakingUser, tokenDist, user } = ctx;
+
+        await stakingUser.stake(ether("10000"), lockTwoWeeks);
+
+        const balanceBefore = await tokenDist.balanceOf(user.address);
+
+        // Move forward one week - rewards should be emitted
+        await increaseTime(oneWeekSec * 2);
+
+        // Unbond to update reward
+        await stakingUser.unbondAll();
+
+        await staking.emergencyStop(true);
+        await stakingUser.emergencyUnstake();
+
+        // Try to claim rewards normally
+        await expect(stakingUser.claim(0)).to.be.revertedWith("STATE_ContractKilled");
+        await expect(stakingUser.claimAll()).to.be.revertedWith("STATE_ContractKilled");
+
+        // Try to claim rewards thru emergency
+        const tx = await stakingUser.emergencyClaim();
+        const receipt = await tx.wait();
+
+        const claimEvent = receipt.events?.find(e => e.event === "EmergencyClaim");
+
+        expect(claimEvent).to.not.be.undefined;
+        expect(claimEvent?.args?.[0]).to.equal(user.address);
+        expectRoundedEqual(claimEvent?.args?.[1], rewardPerEpoch);
+
+        const balanceAfter = await tokenDist.balanceOf(user.address);
+
+        expectRoundedEqual(balanceAfter.sub(balanceBefore), rewardPerEpoch);
+      });
+    });
+
+    describe("emergencyClaim", () => {
+      const rewardPerEpoch = ether(oneWeekSec.toString());
+
+      beforeEach(async () => {
+        await ctx.staking.setRewardsDuration(oneWeekSec);
+        await ctx.staking.notifyRewardAmount(rewardPerEpoch);
+      });
+
+      it("should revert if the staking program has not been ended", async () => {
+        const { stakingUser } = ctx;
+
+        await expect(stakingUser.emergencyClaim()).to.be.revertedWith("STATE_NoEmergencyUnstake");
+      });
+
+      it("should revert if the contract stopped with claim disabled", async () => {
+        const { staking, stakingUser } = ctx;
+
+        await staking.emergencyStop(false);
+        await expect(stakingUser.emergencyClaim()).to.be.revertedWith("STATE_NoEmergencyClaim");
+      });
+
+      it("should distribute all unclaimed rewards", async () => {
+        const { staking, stakingUser, tokenDist, user } = ctx;
+
+        // Multiple stakes - claim should harvest all
+        await stakingUser.stake(ether("10000"), lockDay);
+        await stakingUser.stake(ether("10000"), lockTwoWeeks);
+
+        const balanceBefore = await tokenDist.balanceOf(user.address);
+
+        // Move forward one week - rewards should be emitted
+        await increaseTime(oneWeekSec * 2);
+
+        // Unbond to update reward
+        await stakingUser.unbondAll();
+
+        await staking.emergencyStop(true);
+
+        // Try to claim rewards thru emergency
+        const tx = await stakingUser.emergencyClaim();
+        const receipt = await tx.wait();
+
+        const claimEvent = receipt.events?.find(e => e.event === "EmergencyClaim");
+
+        // Need looser precision on claim amounts because in emergency situations
+        // we do not recalculate rewards
+        expect(claimEvent).to.not.be.undefined;
+        expect(claimEvent?.args?.[0]).to.equal(user.address);
+        expectRoundedEqual(claimEvent?.args?.[1], rewardPerEpoch, 5);
+
+        const balanceAfter = await tokenDist.balanceOf(user.address);
+
+        expectRoundedEqual(balanceAfter.sub(balanceBefore), rewardPerEpoch, 5);
+      });
+    });
   });
 
   // describe("Admin Operations", () => {

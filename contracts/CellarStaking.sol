@@ -512,14 +512,16 @@ contract CellarStaking is ICellarStaking, Ownable {
 
         _updateRewardForStake(msg.sender, depositId);
 
-        // Increment rewards
         reward = s.rewards;
-        s.rewards = 0;
 
         // Distribute reward
-        distributionToken.safeTransfer(msg.sender, reward);
+        if (reward > 0) {
+            s.rewards = 0;
 
-        emit Claim(msg.sender, depositId, reward);
+            distributionToken.safeTransfer(msg.sender, reward);
+
+            emit Claim(msg.sender, depositId, reward);
+        }
     }
 
     /**
@@ -533,10 +535,15 @@ contract CellarStaking is ICellarStaking, Ownable {
 
         for (uint256 i = 0; i < depositIds.length; i++) {
             UserStake storage s = stakes[msg.sender][depositIds[i]];
-            stakingToken.transfer(msg.sender, s.amount);
-            s.amount = 0;
+            uint256 amount = s.amount;
 
-            emit EmergencyUnstake(msg.sender, depositIds[i], s.amount);
+            if (amount > 0) {
+                s.amount = 0;
+
+                stakingToken.transfer(msg.sender, amount);
+
+                emit EmergencyUnstake(msg.sender, depositIds[i], amount);
+            }
         }
     }
 
@@ -561,11 +568,13 @@ contract CellarStaking is ICellarStaking, Ownable {
             s.rewards = 0;
         }
 
-        distributionToken.safeTransfer(msg.sender, reward);
+        if (reward > 0)  {
+            distributionToken.safeTransfer(msg.sender, reward);
 
-        // No need for per-stake events like emergencyUnstake:
-        // don't need to make sure positions were unwound
-        emit EmergencyClaim(msg.sender, reward);
+            // No need for per-stake events like emergencyUnstake:
+            // don't need to make sure positions were unwound
+            emit EmergencyClaim(msg.sender, reward);
+        }
     }
 
     // ======================================== ADMIN OPERATIONS ========================================
