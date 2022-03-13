@@ -22,6 +22,7 @@ interface ICellarStaking {
     event EmergencyUnstake(address indexed user, uint256 depositId, uint256 amount);
     event EmergencyClaim(address indexed user, uint256 amount);
     event EpochDurationChange(uint256 duration);
+    event DistributorSet(address indexed distributor, bool isSet);
 
     // ===================== Structs ======================
 
@@ -96,9 +97,9 @@ interface ICellarStaking {
 
     function setRewardsDuration(uint256 _epochDuration) external;
 
-    function setRewardsDistribution(address _rewardsDistribution) external;
+    function setRewardsDistribution(address _rewardsDistribution, bool _set) external;
 
-    function updateMinimumDeposit(uint256 _minimum) external;
+    function setMinimumDeposit(uint256 _minimum) external;
 
     function setPaused(bool _paused) external;
 

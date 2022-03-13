@@ -91,7 +91,7 @@ describe("CellarStaking", () => {
       it("should not allow a user to stake if the stake is under the minimum", async () => {
         const { staking, stakingUser } = ctx;
         const min = ether("100");
-        await staking.updateMinimumDeposit(min);
+        await staking.setMinimumDeposit(min);
 
         await expect(stakingUser.stake(min.sub(ether("1")), lockDay)).to.be.revertedWith("USR_MinimumDeposit");
       });
@@ -1328,7 +1328,7 @@ describe("CellarStaking", () => {
     });
   });
 
-  describe.only("Admin Operations", () => {
+  describe("Admin Operations", () => {
     describe("notifyRewardAmount", () => {
       let distributor: SignerWithAddress;
       let stakingDist: CellarStaking;
@@ -1338,9 +1338,9 @@ describe("CellarStaking", () => {
 
         distributor = ctx.signers[5];
         await ctx.tokenDist.mint(distributor.address, totalRewards);
-        await ctx.tokenDist.approve(ctx.staking.address, totalRewards);
+        await ctx.tokenDist.connect(distributor).approve(ctx.staking.address, totalRewards);
 
-        await ctx.staking.setRewardsDistribution(distributor.address);
+        await ctx.staking.setRewardsDistribution(distributor.address, true);
 
         stakingDist = await ctx.connectUser(distributor);
       });
@@ -1353,6 +1353,7 @@ describe("CellarStaking", () => {
 
       it("should revert if caller is the owner but not the reward distributor", async () => {
         const { staking } = ctx;
+        await staking.setRewardsDistribution(await staking.signer.getAddress(), false);
 
         await expect(staking.notifyRewardAmount(ether("100"))).to.be.revertedWith("USR_NotDistributor");
       });
@@ -1385,8 +1386,8 @@ describe("CellarStaking", () => {
         expect(fundingEvent?.args?.[1]).to.equal(latestBlock.timestamp + oneMonthSec);
 
         // Check reward rate, end timestamp, and balances
-        expect(await stakingDist.rewardRate).to.equal(ether("1"));
-        expect(await stakingDist.endTimestamp).to.equal(latestBlock.timestamp + oneMonthSec);
+        expect(await stakingDist.rewardRate()).to.equal(ether("1"));
+        expect(await stakingDist.endTimestamp()).to.equal(latestBlock.timestamp + oneMonthSec);
         expect(await tokenDist.balanceOf(stakingDist.address)).to.equal(rewards);
 
         const balanceAfter = await tokenDist.balanceOf(distributor.address);
@@ -1394,36 +1395,268 @@ describe("CellarStaking", () => {
         expect(balanceBefore.sub(balanceAfter)).to.equal(rewards);
       });
 
-      it("should update and extend existing schedule");
+      it("should update and extend existing schedule", async () => {
+        const { tokenDist, stakingUser } = ctx;
+
+        // Equates to one unit per second distributed
+        const rewards = ether(oneMonthSec.toString());
+        const balanceBefore = await tokenDist.balanceOf(distributor.address);
+
+        await expect(stakingDist.notifyRewardAmount(rewards)).to.not.be.reverted;
+        let latestBlock = await ethers.provider.getBlock("latest");
+
+        await stakingUser.stake(ether("10000"), lockDay);
+
+        expect(await stakingDist.rewardRate()).to.equal(ether("1"));
+        expect(await stakingDist.endTimestamp()).to.equal(latestBlock.timestamp + oneMonthSec);
+        expect(await tokenDist.balanceOf(stakingDist.address)).to.equal(rewards);
+
+        // Run halfway through, then start a new rewards period
+        await increaseTime(oneMonthSec / 2);
+
+        // Have someone claim
+        await stakingUser.claimAll();
+
+        await expect(stakingDist.notifyRewardAmount(rewards)).to.not.be.reverted;
+        latestBlock = await ethers.provider.getBlock("latest");
+
+        // Reward rate should be 1.5x as as large, since leftover 0.5 gets carried
+        expectRoundedEqual(await stakingDist.rewardRate(), ether("1.5"));
+
+        // Period should be reset
+        expect(await stakingDist.endTimestamp()).to.equal(latestBlock.timestamp + oneMonthSec);
+
+        expectRoundedEqual(await tokenDist.balanceOf(stakingDist.address), rewards.div(2).mul(3));
+
+        const balanceAfter = await tokenDist.balanceOf(distributor.address);
+
+        // Funded twice
+        expect(balanceBefore.sub(balanceAfter)).to.equal(rewards.mul(2));
+      });
     });
 
     describe("setRewardsDistribution", () => {
-      it("should revert if caller is not the owner");
-      it("should update the reward distributor");
+      let distributor: SignerWithAddress;
+      let stakingDist: CellarStaking;
+
+      beforeEach(async () => {
+        const totalRewards = ether(String(20_000_000));
+
+        distributor = ctx.signers[5];
+
+        await ctx.tokenDist.mint(distributor.address, totalRewards);
+        await ctx.tokenDist.connect(distributor).approve(ctx.staking.address, totalRewards);
+
+        stakingDist = await ctx.connectUser(distributor);
+      });
+
+      it("should revert if caller is not the owner", async () => {
+        const { stakingUser } = ctx;
+
+        await expect(stakingUser.setRewardsDistribution(stakingUser.address, true)).to.be.revertedWith("Ownable: caller is not the owner");
+      });
+
+      it("should set a reward distributor", async () => {
+        const { staking } = ctx;
+
+        await expect(staking.setRewardsDistribution(distributor.address, true))
+          .to.emit(staking, "DistributorSet")
+          .withArgs(distributor.address, true);
+
+        expect(await staking.isRewardDistributor(distributor.address)).to.be.true;
+
+        // Make sure they can distribute
+        await expect(stakingDist.notifyRewardAmount(oneMonthSec)).to.not.be.reverted;
+      });
+
+      it("should unset a reward distributor", async () => {
+        const { staking } = ctx;
+
+        await expect(staking.setRewardsDistribution(distributor.address, true))
+          .to.emit(staking, "DistributorSet")
+          .withArgs(distributor.address, true);
+
+        // Make sure they can distribute
+        expect(await staking.isRewardDistributor(distributor.address)).to.be.true;
+        await expect(stakingDist.notifyRewardAmount(oneMonthSec)).to.not.be.reverted;
+
+        // Unset
+        await expect(staking.setRewardsDistribution(distributor.address, false))
+          .to.emit(staking, "DistributorSet")
+          .withArgs(distributor.address, false);
+
+        expect(await staking.isRewardDistributor(distributor.address)).to.be.false;
+        await expect(stakingDist.notifyRewardAmount(oneMonthSec)).to.be.revertedWith("USR_NotDistributor");
+      });
     });
 
     describe("setRewardsDuration", () => {
-      it("should revert if caller is not the owner");
-      it("should revert if a current reward period is ongoing");
-      it("should update the reward epoch duration");
+      it("should revert if caller is not the owner", async () => {
+        const { stakingUser } = ctx;
+
+        await expect(stakingUser.setRewardsDuration(oneWeekSec)).to.be.revertedWith("Ownable: caller is not the owner");
+      });
+
+      it("should update the reward epoch duration", async () => {
+        const { staking } = ctx;
+
+        expect(await staking.epochDuration()).to.equal(oneMonthSec);
+
+        await expect(staking.setRewardsDuration(oneWeekSec))
+          .to.emit(staking, "EpochDurationChange")
+          .withArgs(oneWeekSec);
+
+        expect(await staking.epochDuration()).to.equal(oneWeekSec);
+      });
     });
 
-    describe("updateMinimumDeposit", () => {
-      it("should revert if caller is not the owner");
-      it("should set a new minimum staking deposit and immediately enforce it");
+    describe("setMinimumDeposit", () => {
+      it("should revert if caller is not the owner", async () => {
+        const { stakingUser } = ctx;
+
+        await expect(stakingUser.setMinimumDeposit(ether("1"))).to.be.revertedWith("Ownable: caller is not the owner");
+      });
+
+      it("should set a new minimum staking deposit and immediately enforce it", async () => {
+        const { staking, stakingUser } = ctx;
+
+        await staking.notifyRewardAmount(oneMonthSec);
+
+        expect(await staking.minimumDeposit()).to.equal(0);
+        await expect(stakingUser.stake(ether("1"), lockDay)).to.not.be.reverted;
+
+        await expect(staking.setMinimumDeposit(ether("10"))).to.not.be.reverted;
+
+        expect(await staking.minimumDeposit()).to.equal(ether("10"));
+        await expect(stakingUser.stake(ether("1"), lockDay)).to.be.revertedWith("USR_MinimumDeposit");
+      });
     });
 
     describe("setPaused", () => {
-      it("should revert if caller is not the owner");
-      it("should pause the contract");
-      it("should unpause the contract");
+      it("should revert if caller is not the owner", async () => {
+        const { stakingUser } = ctx;
+
+        await expect(stakingUser.setPaused(true)).to.be.revertedWith("Ownable: caller is not the owner");
+      });
+
+      it("should pause the contract", async () => {
+        const { staking, stakingUser } = ctx;
+
+        await expect(staking.setPaused(true)).to.not.be.reverted;
+        expect(await staking.paused()).to.equal(true);
+
+        // Make sure everything paused
+        await expect(stakingUser.stake(ether("10"), lockDay)).to.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.unbond(0)).to.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.unbondAll()).to.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.cancelUnbonding(0)).to.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.cancelUnbondingAll()).to.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.cancelUnbonding(0)).to.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.cancelUnbondingAll()).to.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.unstake(0)).to.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.unstakeAll()).to.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.claim(0)).to.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.claimAll()).to.be.revertedWith("STATE_ContractPaused");
+      });
+
+      it("should unpause the contract", async () => {
+        const { staking, stakingUser } = ctx;
+
+        await expect(staking.setPaused(true)).to.not.be.reverted;
+        expect(await staking.paused()).to.equal(true);
+
+        // Make sure everything paused
+        await expect(stakingUser.stake(ether("10"), lockDay)).to.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.unbond(0)).to.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.unbondAll()).to.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.cancelUnbonding(0)).to.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.cancelUnbondingAll()).to.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.cancelUnbonding(0)).to.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.cancelUnbondingAll()).to.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.unstake(0)).to.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.unstakeAll()).to.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.claim(0)).to.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.claimAll()).to.be.revertedWith("STATE_ContractPaused");
+
+        // Now unpause
+        await expect(staking.setPaused(false)).to.not.be.reverted;
+        expect(await staking.paused()).to.equal(false);
+
+        // Make sure everything allowed (may revert for other reasons)
+        await expect(stakingUser.stake(ether("10"), lockDay)).to.not.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.unbond(0)).to.not.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.unbondAll()).to.not.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.cancelUnbonding(0)).to.not.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.cancelUnbondingAll()).to.not.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.cancelUnbonding(0)).to.not.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.cancelUnbondingAll()).to.not.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.unstake(0)).to.not.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.unstakeAll()).to.not.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.claim(0)).to.not.be.revertedWith("STATE_ContractPaused");
+        await expect(stakingUser.claimAll()).to.not.be.revertedWith("STATE_ContractPaused");
+      });
     });
 
     describe("emergencyStop", () => {
-      it("should revert if caller is not the owner");
-      it("should end the contract while making rewards claimable");
-      it("should end the contract and return distribution tokens if rewards are not claimable");
-      it("should revert if called more than once");
+      it("should revert if caller is not the owner", async () => {
+        const { stakingUser } = ctx;
+
+        await expect(stakingUser.emergencyStop(false)).to.be.revertedWith("Ownable: caller is not the owner");
+      });
+
+      it("should end the contract while making rewards claimable", async () => {
+        const { staking, stakingUser } = ctx;
+
+        await expect(staking.emergencyStop(true))
+          .to.emit(staking, "EmergencyStop")
+          .withArgs(await staking.signer.getAddress(), true);
+
+        expect(await staking.ended()).to.equal(true);
+        expect(await staking.claimable()).to.equal(true);
+
+        await expect(stakingUser.emergencyUnstake()).to.not.be.revertedWith("STATE_NoEmergencyUnstake");
+        await expect(stakingUser.emergencyClaim())
+          .to.not.be.revertedWith("STATE_NoEmergencyClaim")
+          .and.to.not.be.revertedWith("STATE_NoEmergencyUnstake");
+      });
+
+      it("should end the contract and return distribution tokens if rewards are not claimable", async () => {
+        const { admin, staking, stakingUser, tokenDist } = ctx;
+
+        const originalBalance = await tokenDist.balanceOf(admin.address);
+        await staking.notifyRewardAmount(oneMonthSec);
+        const balanceAfterFunding = await tokenDist.balanceOf(admin.address);
+        expect(originalBalance.sub(balanceAfterFunding)).to.equal(oneMonthSec);
+
+        await stakingUser.stake(ether("10"), lockDay);
+
+        await increaseTime(oneWeekSec);
+
+        await expect(staking.emergencyStop(false))
+          .to.emit(staking, "EmergencyStop")
+          .withArgs(await staking.signer.getAddress(), false);
+
+        expect(await staking.ended()).to.equal(true);
+        expect(await staking.claimable()).to.equal(false);
+
+        // Should get all coins back, since stakingUser never claimed
+        const balanceAfterStop = await tokenDist.balanceOf(admin.address);
+        expect(originalBalance).to.equal(balanceAfterStop);
+
+        await expect(stakingUser.emergencyUnstake()).to.not.be.revertedWith("STATE_NoEmergencyUnstake");
+        await expect(stakingUser.emergencyClaim()).to.be.revertedWith("STATE_NoEmergencyClaim");
+      });
+
+      it("should revert if called more than once", async () => {
+        const { staking } = ctx;
+
+        await expect(staking.emergencyStop(true))
+          .to.emit(staking, "EmergencyStop")
+          .withArgs(await staking.signer.getAddress(), true);
+
+        // Try to stop again
+        await expect(staking.emergencyStop(true)).to.be.revertedWith("STATE_AlreadyStopped");
+      });
     });
   });
 
@@ -1443,3 +1676,11 @@ describe("CellarStaking", () => {
   //   });
   // });
 });
+
+/**
+ * TODO Advanced Scenarios:
+ * 1. Simple staking at different times (some locks different)
+ * 2. Mid-stream unbonding and unstaking
+ * 3. Unstaking and re-staking
+ * 4. Unstaking, restaking, reward rate change
+ */

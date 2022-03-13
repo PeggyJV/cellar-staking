@@ -124,8 +124,6 @@ contract CellarStaking is ICellarStaking, Ownable {
     ERC20 public immutable override stakingToken;
     ERC20 public immutable override distributionToken;
     uint256 public override epochDuration;
-    /// @notice address allowed to distribute new rewards
-    address private rewardsDistribution;
 
     uint256 public override minimumDeposit = 0;
     uint256 public override endTimestamp;
@@ -173,7 +171,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         uint256 _epochDuration
     ) {
         stakingToken = _stakingToken;
-        rewardsDistribution = _rewardsDistribution;
+        isRewardDistributor[_rewardsDistribution] = true;
         distributionToken = _distributionToken;
         epochDuration = _epochDuration;
 
@@ -607,20 +605,17 @@ contract CellarStaking is ICellarStaking, Ownable {
         endTimestamp = block.timestamp + epochDuration;
 
         // Source rewards
-        distributionToken.safeTransferFrom(rewardsDistribution, address(this), reward);
+        distributionToken.safeTransferFrom(msg.sender, address(this), reward);
 
         emit Funding(reward, endTimestamp);
     }
 
     /**
-     * @notice Change the length of a reward epoch for future reward scheduled.
-     *         Can only be called if previous schedules have finished.
+     * @notice Change the length of a reward epoch for future reward schedules.
      *
      * @param _epochDuration        The new duration for reward schedules.
      */
     function setRewardsDuration(uint256 _epochDuration) external override onlyOwner {
-        if (block.timestamp <= endTimestamp) revert STATE_RewardsOngoing();
-
         epochDuration = _epochDuration;
         emit EpochDurationChange(epochDuration);
     }
@@ -631,7 +626,7 @@ contract CellarStaking is ICellarStaking, Ownable {
      *
      * @param _minimum              The minimum deposit for each new stake.
      */
-    function updateMinimumDeposit(uint256 _minimum) external override onlyOwner {
+    function setMinimumDeposit(uint256 _minimum) external override onlyOwner {
         minimumDeposit = _minimum;
     }
 
@@ -674,9 +669,12 @@ contract CellarStaking is ICellarStaking, Ownable {
      *         new rewards.
      *
      * @param _rewardsDistribution  The new reward distributor.
+     * @param _set                  Whether the address should be allowed to distribute.
      */
-    function setRewardsDistribution(address _rewardsDistribution) external override onlyOwner {
-        rewardsDistribution = _rewardsDistribution;
+    function setRewardsDistribution(address _rewardsDistribution, bool _set) external override onlyOwner {
+        isRewardDistributor[_rewardsDistribution] = _set;
+
+        emit DistributorSet(_rewardsDistribution, _set);
     }
 
     // ======================================= STATE INFORMATION =======================================
@@ -792,7 +790,8 @@ contract CellarStaking is ICellarStaking, Ownable {
      * @dev Can only be called by the designated reward distributor
      */
     modifier onlyRewardsDistribution() {
-        if(msg.sender != rewardsDistribution) revert USR_NotDistributor();
+        if(!isRewardDistributor[msg.sender]) revert USR_NotDistributor();
+
         _;
     }
 
