@@ -89,7 +89,7 @@ import "./interfaces/ICellarStaking.sol";
  *     (previous 82.857 + 5000 tokens emitted over 50 seconds / 170 staked == 29.41)
  *
  *
- * Then, each user will receive rewards proportional to the their number of tokens.
+ * Then, each user will receive rewards proportional to the their number of tokens. At second 100:
  * a) User 1 will receive 50 * 112.267 = 5613.35 rewards
  * b) User 2 will receive 20 * (112.267 - 40) = 1445.34
  *       (40 is deducted because it was the current rewardPerToken value on deposit)
@@ -136,7 +136,7 @@ contract CellarStaking is ICellarStaking, Ownable {
     ERC20 public immutable override distributionToken;
     uint256 public override epochDuration;
 
-    uint256 public override minimumDeposit = 0;
+    uint256 public override minimumDeposit;
     uint256 public override endTimestamp;
     uint256 public override totalDeposits;
     uint256 public override totalDepositsWithBoost;
@@ -576,7 +576,7 @@ contract CellarStaking is ICellarStaking, Ownable {
             s.rewards = 0;
         }
 
-        if (reward > 0)  {
+        if (reward > 0) {
             distributionToken.safeTransfer(msg.sender, reward);
 
             // No need for per-stake events like emergencyUnstake:
@@ -775,7 +775,7 @@ contract CellarStaking is ICellarStaking, Ownable {
      * @dev Can only be called by the designated reward distributor
      */
     modifier onlyRewardsDistribution() {
-        if(!isRewardDistributor[msg.sender]) revert USR_NotDistributor();
+        if (!isRewardDistributor[msg.sender]) revert USR_NotDistributor();
 
         _;
     }
