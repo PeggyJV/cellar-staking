@@ -155,14 +155,8 @@ contract CellarStaking is ICellarStaking, Ownable {
 
     // ============= User State ==============
 
-    /// @notice user => depositId => UserInfo
-    mapping(address => mapping(uint256 => UserStake)) public stakes;
-    /// @notice user => depositId[]
-    mapping(address => uint256[]) public allUserStakes;
-    /// @notice user => depositId => index in allUserStakes
-    mapping(address => mapping(uint256 => uint256)) public depositIdIdx;
-    /// @notice user => current index of user deposit array
-    mapping(address => uint256) public currentUserDepositIdx;
+    /// @notice user => all user's staking positions
+    mapping(address => UserStake[]) public stakes;
 
     // ========================================== CONSTRUCTOR ===========================================
 
@@ -198,32 +192,23 @@ contract CellarStaking is ICellarStaking, Ownable {
      * @param amount                The amount of the stakingToken to stake.
      * @param lock                  The amount of time to lock stake for.
      */
-    function stake(uint256 amount, Lock lock)
-        external
-        override
-        whenNotPaused
-        updateRewards
-    {
+    function stake(uint256 amount, Lock lock) external override whenNotPaused updateRewards {
         if (amount == 0) revert USR_ZeroDeposit();
         if (amount < minimumDeposit) revert USR_MinimumDeposit(amount, minimumDeposit);
         if (block.timestamp > endTimestamp) revert STATE_NoRewardsLeft();
 
-        // Record deposit
-        uint256 depositId = currentUserDepositIdx[msg.sender]++;
-        depositIdIdx[msg.sender][depositId] = allUserStakes[msg.sender].length;
-        allUserStakes[msg.sender].push(depositId);
-        UserStake storage s = stakes[msg.sender][depositId];
-
         // Do share accounting and populate user stake information
         (uint256 boost, ) = _getBoost(lock);
-        uint256 amountWithBoost = amount + (amount * boost / ONE);
+        uint256 amountWithBoost = amount + ((amount * boost) / ONE);
 
-        s.amount = amount;
-        s.amountWithBoost = amountWithBoost;
-        s.rewardPerTokenPaid = rewardPerTokenStored;
-        s.rewards = 0;
-        s.unbondTimestamp = 0;
-        s.lock = lock;
+        stakes[msg.sender].push(UserStake({
+            amount: amount,
+            amountWithBoost: amountWithBoost,
+            rewardPerTokenPaid: rewardPerTokenStored,
+            rewards: 0,
+            unbondTimestamp: 0,
+            lock: lock
+        }));
 
         // Update global state
         totalDeposits += amount;
@@ -231,7 +216,7 @@ contract CellarStaking is ICellarStaking, Ownable {
 
         stakingToken.safeTransferFrom(msg.sender, address(this), amount);
 
-        emit Stake(msg.sender, depositId, amount);
+        emit Stake(msg.sender, stakes[msg.sender].length - 1, amount);
     }
 
     /**
@@ -241,12 +226,7 @@ contract CellarStaking is ICellarStaking, Ownable {
      * @param depositId             The specified deposit to unstake from.
      *
      */
-    function unbond(uint256 depositId)
-        external
-        override
-        whenNotPaused
-        updateRewards
-    {
+    function unbond(uint256 depositId) external override whenNotPaused updateRewards {
         _unbond(depositId);
     }
 
@@ -255,20 +235,14 @@ contract CellarStaking is ICellarStaking, Ownable {
      * @dev     Different deposits may have different timelocks.
      *
      */
-    function unbondAll()
-        external
-        override
-        whenNotPaused
-        updateRewards
-    {
+    function unbondAll() external override whenNotPaused updateRewards {
         // Individually unbond each deposit
-        uint256[] memory depositIds = allUserStakes[msg.sender];
-
-        for (uint256 i = 0; i < depositIds.length; i++) {
-            UserStake storage s = stakes[msg.sender][depositIds[i]];
+        UserStake[] storage userStakes = stakes[msg.sender];
+        for (uint256 i = 0; i < userStakes.length; i++) {
+            UserStake storage s = userStakes[i];
 
             if (s.unbondTimestamp == 0) {
-                _unbond(depositIds[i]);
+                _unbond(i);
             }
         }
     }
@@ -309,12 +283,7 @@ contract CellarStaking is ICellarStaking, Ownable {
      * @param depositId             The specified deposit to unstake from.
      *
      */
-    function cancelUnbonding(uint256 depositId)
-        external
-        override
-        whenNotPaused
-        updateRewards
-    {
+    function cancelUnbonding(uint256 depositId) external override whenNotPaused updateRewards {
         _cancelUnbonding(depositId);
     }
 
@@ -323,20 +292,14 @@ contract CellarStaking is ICellarStaking, Ownable {
      * @dev     Only cancels stakes that are unbonding.
      *
      */
-    function cancelUnbondingAll()
-        external
-        override
-        whenNotPaused
-        updateRewards
-    {
+    function cancelUnbondingAll() external override whenNotPaused updateRewards {
         // Individually unbond each deposit
-        uint256[] memory depositIds = allUserStakes[msg.sender];
-
-        for (uint256 i = 0; i < depositIds.length; i++) {
-            UserStake storage s = stakes[msg.sender][depositIds[i]];
+        UserStake[] storage userStakes = stakes[msg.sender];
+        for (uint256 i = 0; i < userStakes.length; i++) {
+            UserStake storage s = userStakes[i];
 
             if (s.unbondTimestamp > 0) {
-                _cancelUnbonding(depositIds[i]);
+                _cancelUnbonding(i);
             }
         }
     }
@@ -380,13 +343,7 @@ contract CellarStaking is ICellarStaking, Ownable {
      *
      * @return reward               The amount of accumulated rewards since the last reward claim.
      */
-    function unstake(uint256 depositId)
-        external
-        override
-        whenNotPaused
-        updateRewards
-        returns (uint256 reward)
-    {
+    function unstake(uint256 depositId) external override whenNotPaused updateRewards returns (uint256 reward) {
         return _unstake(depositId);
     }
 
@@ -397,22 +354,16 @@ contract CellarStaking is ICellarStaking, Ownable {
      *
      * @return rewards              The amount of accumulated rewards since the last reward claim.
      */
-    function unstakeAll()
-        external
-        override
-        whenNotPaused
-        updateRewards
-        returns (uint256[] memory)
-    {
+    function unstakeAll() external override whenNotPaused updateRewards returns (uint256[] memory) {
         // Individually unstake each deposit
-        uint256[] memory depositIds = allUserStakes[msg.sender];
-        uint256[] memory rewards = new uint256[](depositIds.length);
+        UserStake[] storage userStakes = stakes[msg.sender];
+        uint256[] memory rewards = new uint256[](userStakes.length);
 
-        for (uint256 i = 0; i < depositIds.length; i++) {
-            UserStake storage s = stakes[msg.sender][depositIds[i]];
+        for (uint256 i = 0; i < userStakes.length; i++) {
+            UserStake storage s = userStakes[i];
 
             if (s.unbondTimestamp > 0 && block.timestamp >= s.unbondTimestamp) {
-                rewards[i] = _unstake(depositIds[i]);
+                rewards[i] = _unstake(i);
             }
         }
 
@@ -468,13 +419,7 @@ contract CellarStaking is ICellarStaking, Ownable {
      *
      * @return reward               The amount of accumulated rewards since the last reward claim.
      */
-    function claim(uint256 depositId)
-        external
-        override
-        whenNotPaused
-        updateRewards
-        returns (uint256 reward)
-    {
+    function claim(uint256 depositId) external override whenNotPaused updateRewards returns (uint256 reward) {
         return _claim(depositId);
     }
 
@@ -487,19 +432,13 @@ contract CellarStaking is ICellarStaking, Ownable {
      *                               Each element of the array specified rewards for the corresponding
      *                               indexed deposit.
      */
-    function claimAll()
-        external
-        override
-        whenNotPaused
-        updateRewards
-        returns (uint256[] memory rewards)
-    {
+    function claimAll() external override whenNotPaused updateRewards returns (uint256[] memory rewards) {
         // Individually claim for each stake
-        uint256[] memory depositIds = allUserStakes[msg.sender];
-        rewards = new uint256[](depositIds.length);
+        UserStake[] storage userStakes = stakes[msg.sender];
+        rewards = new uint256[](userStakes.length);
 
-        for (uint256 i = 0; i < depositIds.length; i++) {
-            rewards[i] = _claim(depositIds[i]);
+        for (uint256 i = 0; i < userStakes.length; i++) {
+            rewards[i] = _claim(i);
         }
     }
 
@@ -539,10 +478,9 @@ contract CellarStaking is ICellarStaking, Ownable {
     function emergencyUnstake() external override {
         if (!ended) revert STATE_NoEmergencyUnstake();
 
-        uint256[] memory depositIds = allUserStakes[msg.sender];
-
-        for (uint256 i = 0; i < depositIds.length; i++) {
-            UserStake storage s = stakes[msg.sender][depositIds[i]];
+        UserStake[] storage userStakes = stakes[msg.sender];
+        for (uint256 i = 0; i < userStakes.length; i++) {
+            UserStake storage s = userStakes[i];
             uint256 amount = s.amount;
 
             if (amount > 0) {
@@ -550,7 +488,7 @@ contract CellarStaking is ICellarStaking, Ownable {
 
                 stakingToken.transfer(msg.sender, amount);
 
-                emit EmergencyUnstake(msg.sender, depositIds[i], amount);
+                emit EmergencyUnstake(msg.sender, i, amount);
             }
         }
     }
@@ -567,16 +505,16 @@ contract CellarStaking is ICellarStaking, Ownable {
         if (!claimable) revert STATE_NoEmergencyClaim();
 
         uint256 reward;
-        uint256[] memory depositIds = allUserStakes[msg.sender];
 
-        for (uint256 i = 0; i < depositIds.length; i++) {
-            UserStake storage s = stakes[msg.sender][depositIds[i]];
+        UserStake[] storage userStakes = stakes[msg.sender];
+        for (uint256 i = 0; i < userStakes.length; i++) {
+            UserStake storage s = userStakes[i];
 
             reward += s.rewards;
             s.rewards = 0;
         }
 
-        if (reward > 0)  {
+        if (reward > 0) {
             distributionToken.safeTransfer(msg.sender, reward);
 
             // No need for per-stake events like emergencyUnstake:
@@ -593,9 +531,7 @@ contract CellarStaking is ICellarStaking, Ownable {
      *
      * @param reward                The amount of rewards to distribute per second.
      */
-    function notifyRewardAmount(
-        uint256 reward
-    ) external override onlyRewardsDistribution updateRewards {
+    function notifyRewardAmount(uint256 reward) external override onlyRewardsDistribution updateRewards {
         if (reward < epochDuration) revert USR_ZeroRewardsPerEpoch();
 
         if (block.timestamp >= endTimestamp) {
@@ -717,56 +653,6 @@ contract CellarStaking is ICellarStaking, Ownable {
         uint256 newRewardsPerToken = rewardsForTime * ONE / totalDepositsWithBoost;
 
         return rewardPerTokenStored + newRewardsPerToken;
-    }
-
-    /**
-     * @notice Returns user stake info.
-     * @dev    Used to circumvent limitations around returning nested mappings.
-     *
-     * @param user                  The user to query.
-     * @param depositId             The depositId for the user used to look up the stake.
-     *
-     * @return                      The stake information for the specified depositId;
-     */
-    function getUserStake(address user, uint256 depositId) public view override returns (UserStake memory) {
-        return stakes[user][depositId];
-    }
-
-    /**
-     * @notice Returns list of deposit IDs for user.
-     * @dev    Used to circumvent limitations around returning complex types.
-     *
-     * @param user                  The user to query.
-     *
-     * @return                      The list of deposit IDs.
-     */
-    function getAllUserStakes(address user) public view override returns (uint256[] memory) {
-        return allUserStakes[user];
-    }
-
-    /**
-     * @notice Returns the index in userStakes of depositId.
-     * @dev    Used to circumvent limitations around returning complex types.
-     *
-     * @param user                  The user to query.
-     * @param depositId             The depositId for the user used to find the index of.
-     *
-     * @return                      The index of the given depositId.
-     */
-    function getDepositIdIdx(address user, uint256 depositId) public view override returns (uint256) {
-        return depositIdIdx[user][depositId];
-    }
-
-    /**
-     * @notice Returns the current deposit index of a user.
-     * @dev    Used to circumvent limitations around returning complex types.
-     *
-     * @param user                  The user to query.
-     *
-     * @return                      The current deposit index.
-     */
-    function getCurrentUserDepositIdx(address user) public view override returns (uint256) {
-        return currentUserDepositIdx[user];
     }
 
     // ============================================ HELPERS ============================================
