@@ -118,7 +118,9 @@ describe("CellarStaking", () => {
 
       it("should revert for an invalid lock value", async () => {
         const { stakingUser } = ctx;
-        await expect(stakingUser.stake(ether("1"), 99)).to.be.revertedWith("function was called with incorrect parameter");
+        await expect(stakingUser.stake(ether("1"), 99)).to.be.revertedWith(
+          "function was called with incorrect parameter",
+        );
       });
 
       it("should allow one user to stake with 100% proportional share", async () => {
@@ -420,7 +422,7 @@ describe("CellarStaking", () => {
 
       it("should revert if passed an out of bounds deposit ID", async () => {
         const { stakingUser } = ctx;
-        await expect(stakingUser.unbond(2)).to.be.revertedWith("USR_NoDeposit");
+        await expect(stakingUser.unbond(2)).to.be.reverted;
       });
 
       it("should revert if the specified deposit is already unbonding", async () => {
@@ -448,9 +450,7 @@ describe("CellarStaking", () => {
         expect(stake.unbondTimestamp).to.equal(0);
         expect(stake.lock).to.equal(lockDay);
 
-        await expect(stakingUser.unbond(0))
-          .to.emit(stakingUser, "Unbond")
-          .withArgs(user.address, 0, stakeAmount);
+        await expect(stakingUser.unbond(0)).to.emit(stakingUser, "Unbond").withArgs(user.address, 0, stakeAmount);
 
         // Check updated stake
         const updatedStake = await stakingUser.stakes(user.address, 0);
@@ -512,7 +512,7 @@ describe("CellarStaking", () => {
         const tx = await stakingUser.unbondAll();
         const receipt = await tx.wait();
 
-        const unbondEvents = await receipt.events?.filter((e) => e.event === "Unbond");
+        const unbondEvents = await receipt.events?.filter(e => e.event === "Unbond");
         expect(unbondEvents?.length === 2);
 
         // Check other stakes updated
@@ -546,7 +546,7 @@ describe("CellarStaking", () => {
 
       it("should revert if passed an out of bounds deposit ID", async () => {
         const { stakingUser } = ctx;
-        await expect(stakingUser.cancelUnbonding(2)).to.be.revertedWith("USR_NoDeposit");
+        await expect(stakingUser.cancelUnbonding(2)).to.be.reverted;
       });
 
       it("should revert if the specified deposit is not unbonding", async () => {
@@ -586,9 +586,7 @@ describe("CellarStaking", () => {
         expect(updatedStake.lock).to.equal(lockDay);
 
         // Now cancel
-        await expect(stakingUser.cancelUnbonding(0))
-          .to.emit(stakingUser, "CancelUnbond")
-          .withArgs(user.address, 0);
+        await expect(stakingUser.cancelUnbonding(0)).to.emit(stakingUser, "CancelUnbond").withArgs(user.address, 0);
 
         const originalStake = await stakingUser.stakes(user.address, 0);
 
@@ -642,7 +640,7 @@ describe("CellarStaking", () => {
         const tx = await stakingUser.cancelUnbondingAll();
         const receipt = await tx.wait();
 
-        const cancelEvents = await receipt.events?.filter((e) => e.event === "CancelUnbond");
+        const cancelEvents = await receipt.events?.filter(e => e.event === "CancelUnbond");
         expect(cancelEvents?.length === 2);
 
         // Check all stakes match original
@@ -684,12 +682,11 @@ describe("CellarStaking", () => {
 
         await ctx.staking.notifyRewardAmount(rewardPerEpoch);
         await ctx.stakingUser.stake(stakeAmount, lockDay);
-
       });
 
       it("should revert if passed an out of bounds deposit id", async () => {
         const { stakingUser } = ctx;
-        await expect(stakingUser.unstake(2)).to.be.revertedWith("USR_NoDeposit");
+        await expect(stakingUser.unstake(2)).to.be.reverted;
       });
 
       it("should not allow unstaking a stake that is still locked", async () => {
@@ -712,9 +709,7 @@ describe("CellarStaking", () => {
         await increaseTime(oneWeekSec);
 
         // Unbond one stake
-        await expect(stakingUser.unbond(0))
-          .to.emit(stakingUser, "Unbond")
-          .withArgs(user.address, 0, stakeAmount);
+        await expect(stakingUser.unbond(0)).to.emit(stakingUser, "Unbond").withArgs(user.address, 0, stakeAmount);
 
         // Check updated stake
         const updatedStake = await stakingUser.stakes(user.address, 0);
@@ -1207,7 +1202,7 @@ describe("CellarStaking", () => {
         const tx = await stakingUser.emergencyUnstake();
         const receipt = await tx.wait();
 
-        const unstakeEvents = await receipt.events?.filter((e) => e.event === "Unbond");
+        const unstakeEvents = await receipt.events?.filter(e => e.event === "Unbond");
         expect(unstakeEvents?.length === 2);
 
         for (const i in unstakeEvents!) {
@@ -1454,7 +1449,9 @@ describe("CellarStaking", () => {
       it("should revert if caller is not the owner", async () => {
         const { stakingUser } = ctx;
 
-        await expect(stakingUser.setRewardsDistribution(stakingUser.address, true)).to.be.revertedWith("Ownable: caller is not the owner");
+        await expect(stakingUser.setRewardsDistribution(stakingUser.address, true)).to.be.revertedWith(
+          "Ownable: caller is not the owner",
+        );
       });
 
       it("should set a reward distributor", async () => {
@@ -1722,7 +1719,7 @@ describe("CellarStaking", () => {
         await stakingUser.unstake(0);
 
         // Get reward per tokenStored
-        const rewardPerToken = (await stakingUser.rewardPerToken());
+        const rewardPerToken = await stakingUser.rewardPerToken();
         const rewardPerTokenStored = await stakingUser.rewardPerTokenStored();
 
         expect(rewardPerToken).to.equal(rewardPerTokenStored);
@@ -1731,7 +1728,7 @@ describe("CellarStaking", () => {
         await increaseTime(oneMonthSec);
 
         // Check again
-        const newRewardPerToken = (await stakingUser.rewardPerToken());
+        const newRewardPerToken = await stakingUser.rewardPerToken();
         const newRewardPerTokenStored = await stakingUser.rewardPerTokenStored();
 
         expect(rewardPerTokenStored).to.equal(newRewardPerTokenStored);
@@ -1755,7 +1752,7 @@ describe("CellarStaking", () => {
       it("should report the details of a single stake", async () => {
         const { stakingUser, user } = ctx;
 
-        const stake1 = await stakingUser.getUserStake(user.address, 0);
+        const stake1 = await stakingUser.stakes(user.address, 0);
         let boostMultiplier = stakeAmount.mul(await stakingUser.ONE_DAY_BOOST()).div(ether("1"));
         let expectedAmountWithBoost = stakeAmount.add(boostMultiplier);
 
@@ -1765,8 +1762,11 @@ describe("CellarStaking", () => {
         expect(stake1.unbondTimestamp).to.equal(0);
         expect(stake1.lock).to.equal(lockDay);
 
-        const stake2 = await stakingUser.getUserStake(user.address, 1);
-        boostMultiplier = stakeAmount.mul(2).mul(await stakingUser.ONE_WEEK_BOOST()).div(ether("1"));
+        const stake2 = await stakingUser.stakes(user.address, 1);
+        boostMultiplier = stakeAmount
+          .mul(2)
+          .mul(await stakingUser.ONE_WEEK_BOOST())
+          .div(ether("1"));
         expectedAmountWithBoost = stakeAmount.mul(2).add(boostMultiplier);
 
         expect(stake2.amount).to.equal(stakeAmount.mul(2));
@@ -1775,8 +1775,11 @@ describe("CellarStaking", () => {
         expect(stake2.unbondTimestamp).to.equal(0);
         expect(stake2.lock).to.equal(lockWeek);
 
-        const stake3 = await stakingUser.getUserStake(user.address, 2);
-        boostMultiplier = stakeAmount.mul(3).mul(await stakingUser.TWO_WEEKS_BOOST()).div(ether("1"));
+        const stake3 = await stakingUser.stakes(user.address, 2);
+        boostMultiplier = stakeAmount
+          .mul(3)
+          .mul(await stakingUser.TWO_WEEKS_BOOST())
+          .div(ether("1"));
         expectedAmountWithBoost = stakeAmount.mul(3).add(boostMultiplier);
 
         expect(stake3.amount).to.equal(stakeAmount.mul(3));
@@ -1784,31 +1787,6 @@ describe("CellarStaking", () => {
         expect(stake3.rewards).to.equal(0);
         expect(stake3.unbondTimestamp).to.equal(0);
         expect(stake3.lock).to.equal(lockTwoWeeks);
-      });
-
-      it("should report all stakes for a user", async () => {
-        const { stakingUser, user } = ctx;
-
-        const stakes = await stakingUser.getAllUserStakes(user.address);
-
-        expect(stakes.length).to.equal(3);
-        expect(stakes[0]).to.equal(0);
-        expect(stakes[1]).to.equal(1);
-        expect(stakes[2]).to.equal(2);
-      });
-
-      it("should report the correct index for a user stake", async () => {
-        const { stakingUser, user } = ctx;
-
-        expect(await stakingUser.getDepositIdIdx(user.address, 0)).to.equal(0);
-        expect(await stakingUser.getDepositIdIdx(user.address, 1)).to.equal(1);
-        expect(await stakingUser.getDepositIdIdx(user.address, 2)).to.equal(2);
-      });
-
-      it("should report the latest deposit ID for a user", async () => {
-        const { stakingUser, user } = ctx;
-
-        expect(await stakingUser.getCurrentUserDepositIdx(user.address)).to.equal(3);
       });
     });
   });
