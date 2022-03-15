@@ -9,4 +9,3 @@
 [] Write advanced test scenarios
 [X] Write README
 [] Write deploy script
-[] Write mainnet fork integration test script (using deploy)

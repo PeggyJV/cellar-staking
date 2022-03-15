@@ -6,7 +6,7 @@ When staking, users must choose an "unbonding" time - this is the cooldown perio
 
 ## Features
 
-* 💰 Admins can set the length of a rewards epoch and fund a certain amount of rewards, starting an epoch.
+* 🏦 Admins can set the length of a rewards epoch and fund a certain amount of rewards, starting an epoch.
 * ⬇️ Users can stake coins in the bonding program, choosing 1-day, 7-day, or 14-day bonding. User's stakes receives multipliers based on bonding period. For instance, a deposit of 100 LP shares with a 2-week unbonding period will receive the equivalent of 200 LP shares deposited with no boost.
 * 🎁 Users begin to accumulate rewards as soon as their stake is deposited.
 * 🎊 Users can claim accumulated rewards at any time.
