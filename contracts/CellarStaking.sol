@@ -151,7 +151,7 @@ contract CellarStaking is ICellarStaking, Ownable {
     bool public override claimable;
 
     /// @notice Tracks if an address can call notifyReward()
-    mapping(address => bool) public isRewardDistributor;
+    mapping(address => bool) public override isRewardDistributor;
 
     // ============= User State ==============
 
@@ -653,6 +653,18 @@ contract CellarStaking is ICellarStaking, Ownable {
         uint256 newRewardsPerToken = rewardsForTime * ONE / totalDepositsWithBoost;
 
         return rewardPerTokenStored + newRewardsPerToken;
+    }
+
+    /**
+     * @notice Returns the number of stakes for a user. Can be used off-chain to
+     *         make iterating through user stakes easier.
+     *
+     * @param user                      The user to count stakes for.
+     *
+     * @return stakes                   The number of stakes for the user.
+     */
+    function numStakes(address user) public view override returns (uint256) {
+        return stakes[user].length;
     }
 
     // ============================================ HELPERS ============================================

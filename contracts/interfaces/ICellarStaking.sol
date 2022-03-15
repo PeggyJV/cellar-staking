@@ -67,6 +67,8 @@ interface ICellarStaking {
 
     function claimable() external returns (bool);
 
+    function isRewardDistributor(address user) external returns (bool);
+
     // ================ User Functions ================
 
     function stake(uint256 amount, Lock lock) external;
@@ -110,4 +112,6 @@ interface ICellarStaking {
     function latestRewardsTimestamp() external view returns (uint256);
 
     function rewardPerToken() external view returns (uint256);
+
+    function numStakes(address user) external view returns (uint256);
 }

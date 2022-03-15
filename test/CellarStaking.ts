@@ -1788,6 +1788,13 @@ describe("CellarStaking", () => {
         expect(stake3.unbondTimestamp).to.equal(0);
         expect(stake3.lock).to.equal(lockTwoWeeks);
       });
+
+      it("should report the correct number of user stakes", async () => {
+          const { stakingUser, user } = ctx;
+
+          const numStakes = await stakingUser.numStakes(user.address);
+          expect(numStakes).to.equal(3);
+      });
     });
   });
 });
