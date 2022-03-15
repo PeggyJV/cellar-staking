@@ -26,3 +26,5 @@ yarn-error.log*
 
 # types
 src/types/*
+
+.DS_Store
