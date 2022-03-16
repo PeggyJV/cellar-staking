@@ -8,4 +8,4 @@
 [X] Pull interface out and add natspec documentation
 [] Write advanced test scenarios
 [X] Write README
-[] Write deploy script
+[X] Write deploy script
