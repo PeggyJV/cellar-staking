@@ -7,19 +7,18 @@ const { loadFixture } = waffle;
 
 import type { CellarStaking } from "../src/types/CellarStaking";
 import type { MockERC20 } from "../src/types/MockERC20";
-import { ether, deploy, increaseTime, rand, setNextBlockTimestamp, expectRoundedEqual } from "./utils";
 import { Block } from "@ethersproject/providers";
+import {
+    ether,
+    deploy,
+    increaseTime,
+    rand,
+    setNextBlockTimestamp,
+    expectRoundedEqual ,
+    TestContext
+} from "./utils";
 
-interface TestContext {
-  admin: SignerWithAddress;
-  connectUser: (signer: SignerWithAddress) => Promise<CellarStaking>;
-  signers: SignerWithAddress[];
-  staking: CellarStaking;
-  stakingUser: CellarStaking;
-  tokenDist: MockERC20;
-  tokenStake: MockERC20;
-  user: SignerWithAddress;
-}
+
 
 const oneDaySec = 60 * 60 * 24;
 const oneWeekSec = oneDaySec * 7;
@@ -1797,12 +1796,19 @@ describe("CellarStaking", () => {
       });
     });
   });
+
+  describe("Advanced Scenarios", () => {
+      it("scenario 1", async () => {
+
+      });
+  })
 });
 
 /**
  * TODO Advanced Scenarios:
- * 1. Simple staking at different times (some locks different)
- * 2. Mid-stream unbonding and unstaking
- * 3. Unstaking and re-staking
- * 4. Unstaking, restaking, reward rate change
+ * 1. Simple staking at different times (same locks)
+ * 2. Simple staking at different times (some locks different)
+ * 3. Mid-stream unbonding and unstaking
+ * 4. Unstaking and re-staking
+ * 5. Unstaking, restaking, reward rate change
  */
