@@ -340,133 +340,125 @@ export const setupAdvancedScenario2 = (ctx: TestContext): ScenarioInfo => {
     return { actions, rewards };
 };
 
+export const setupAdvancedScenario3 = (ctx: TestContext): ScenarioInfo => {
+    // Advanced Scenario 3:
+    // (Different stake times and locks, midstream unbonding and unstaking)
+    //
+    // Staker 1 Deposits N at 0 with two week lock (v = 2N)
+    // Staker 2 Deposits 3N at 0 with one day lock (v = 3.3N)
+    // Staker 3 Deposits 2N at 0.25 with one week lock (v = 2.8N)
+    // Staker 2 Unbonds 3N at 0.25 (v = 3N)
+    // Staker 4 Deposits 4N at 0.5 with two week lock (v = 8N)
+    // Staker 3 Deposits 2N at 0.5 with one day lock (v = 2.2N)
+    // Staker 2 Unstakes 3N at 0.75 (v = 0)
+    // Staker 4 Unbonds 4N at 0.75 (v = 4N)
+    //
+    //            Staker 1 %        Staker 2 %      Staker 3 %     Staker 4 %
+    // At T = 0:     37.73            62.26               0               0
+    // At T = 0.25:  25.64            38.46            35.9               0
+    // At T = 0.5:   11.11            16.67           27.78           44.44
+    // At T = 0.75:  18.18                0           45.45           36.36
+    // Totals:       23.17            29.35           27.28            10.2
+    // Total Deposits:
 
-// export const setupAdvancedScenario2 = (ctx: TestContext): ScenarioInfo => {
-//     // Advanced Scenario 2:
-//     // (Different stake times, prestaking and unstaking, no nft boosts)
-//     //
-//     // Staker 1 Deposits N at -1000
-//     // Staker 1 Withdraws N at -500
-//     // Staker 2 Deposits 3N at 0
-//     // Staker 3 Deposits N at 0
-//     // Staker 4 Deposits 9N at 0.25
-//     // Staker 2 Withdraws 3N at 0.25
-//     // Staker 1 Deposits 2N At 0.5
-//     // Staker 2 Deposits 3N at 0.75
-//     //
-//     //            Staker 1 %        Staker 2 %      Staker 3 %     Staker 4 %
-//     // At T = -1000: 100                0               0               0
-//     // At T = -500:    0                0               0               0
-//     // At T = 0:       0               75              25               0
-//     // At T = 0.25:    0                0              10              90
-//     // At T = 0.5: 16.67                0            8.33              75
-//     // At T = 0.75:13.33               20            6.67              60
-//     // Totals:       7.5            23.75            12.5           56.25
+    const {
+        signers: [, user1, user2, user3, user4],
+    } = ctx;
 
-//     const {
-//         users: [user1, user2, user3, user4],
-//         start,
-//         end,
-//     } = ctx;
+    const baseAmount = ether("100");
+    const totalTime = oneMonthSec;
+    const totalRewardsBase = TOTAL_REWARDS.div(10000);
 
-//     const baseAmount = ether("100");
-//     const totalTime = oneMonthSec;
-//     const totalRewardsBase = TOTAL_REWARDS.div(10000);
+    const actions: Action[] = [
+        {
+            timestamp: programStart + 5,
+            actions: [
+                {
+                    signer: user1,
+                    amount: baseAmount,
+                    action: "deposit",
+                    lock: lockTwoWeeks
+                },
+                {
+                    signer: user2,
+                    amount: baseAmount.mul(3),
+                    action: "deposit",
+                    lock: lockDay
+                }
+            ],
+        },
+        {
+            timestamp: programStart + totalTime * 0.25,
+            actions: [
+                {
+                    signer: user3,
+                    amount: baseAmount.mul(2),
+                    action: "deposit",
+                    lock: lockWeek
+                },
+                {
+                    signer: user3,
+                    amount: 0,
+                    action: "unbond"
+                },
+            ],
+        },
+        {
+            timestamp: programStart + totalTime * 0.5,
+            actions: [
+                {
+                    signer: user4,
+                    amount: baseAmount.mul(4),
+                    action: "deposit",
+                    lock: lockTwoWeeks
+                },
+                {
+                    signer: user3,
+                    amount: baseAmount.mul(2),
+                    action: "deposit",
+                    lock: lockDay
+                },
+            ],
+        },
+        {
+            timestamp: programStart + totalTime * 0.75,
+            actions: [
+                {
+                    signer: user4,
+                    amount: 0,
+                    action: "unbond",
+                },
+                {
+                    signer: user2,
+                    amount: 0,
+                    action: "withdraw"
+                },
+            ],
+        },
+    ];
 
-//     const actions: Action[] = [
-//         {
-//             timestamp: start - ONE_DAY_SEC - 5_000_000,
-//             actions: [
-//                 {
-//                     signer: user1,
-//                     amount: baseAmount,
-//                     action: "deposit",
-//                 },
-//             ],
-//         },
-//         {
-//             timestamp: start - ONE_DAY_SEC - 100_000,
-//             actions: [
-//                 {
-//                     signer: user1,
-//                     amount: 0,
-//                     action: "withdraw",
-//                 },
-//             ],
-//         },
-//         {
-//             timestamp: start - ONE_DAY_SEC - 100,
-//             actions: [
-//                 {
-//                     signer: user2,
-//                     amount: baseAmount.mul(3),
-//                     action: "deposit",
-//                 },
-//                 {
-//                     signer: user3,
-//                     amount: baseAmount,
-//                     action: "deposit",
-//                 },
-//             ],
-//         },
-//         {
-//             timestamp: start + totalTime * 0.25,
-//             actions: [
-//                 {
-//                     signer: user4,
-//                     amount: baseAmount.mul(9),
-//                     action: "deposit",
-//                 },
-//                 {
-//                     signer: user2,
-//                     amount: 0,
-//                     action: "withdraw",
-//                 },
-//             ],
-//         },
-//         {
-//             timestamp: start + totalTime * 0.5,
-//             actions: [
-//                 {
-//                     signer: user1,
-//                     amount: baseAmount.mul(2),
-//                     action: "deposit",
-//                 },
-//             ],
-//         },
-//         {
-//             timestamp: start + totalTime * 0.75,
-//             actions: [
-//                 {
-//                     signer: user2,
-//                     amount: baseAmount.mul(3),
-//                     action: "deposit",
-//                 },
-//             ],
-//         },
-//     ];
+    const rewards: RewardInfo[] = [
+        {
+            signer: user1,
+            expectedReward: totalRewardsBase.mul(2317),
+        },
+        {
+            signer: user2,
+            expectedReward: totalRewardsBase.mul(2935),
+        },
+        {
+            signer: user3,
+            expectedReward: totalRewardsBase.mul(2728),
+        },
+        {
+            signer: user4,
+            expectedReward: totalRewardsBase.mul(1020),
+        },
+    ];
 
-//     const rewards: RewardInfo[] = [
-//         {
-//             signer: user1,
-//             expectedReward: totalRewardsBase.mul(750),
-//         },
-//         {
-//             signer: user2,
-//             expectedReward: totalRewardsBase.mul(2375),
-//         },
-//         {
-//             signer: user3,
-//             expectedReward: totalRewardsBase.mul(1250),
-//         },
-//         {
-//             signer: user4,
-//             expectedReward: totalRewardsBase.mul(5625),
-//         },
-//     ];
+    return { actions, rewards };
+};
 
-//     return { actions, rewards };
-// };
 
 // export const setupAdvancedScenario3 = (ctx: TestContext): ScenarioInfo => {
 //     // Advanced Scenario 3:
