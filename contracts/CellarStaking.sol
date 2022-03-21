@@ -8,6 +8,8 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "./Errors.sol";
 import "./interfaces/ICellarStaking.sol";
 
+import "hardhat/console.sol";
+
 /**
  * @title Sommelier Staking
  * @author Kevin Kennis
@@ -241,7 +243,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         for (uint256 i = 0; i < userStakes.length; i++) {
             UserStake storage s = userStakes[i];
 
-            if (s.unbondTimestamp == 0) {
+            if (s.amount != 0 && s.unbondTimestamp == 0) {
                 _unbond(i);
             }
         }
@@ -298,7 +300,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         for (uint256 i = 0; i < userStakes.length; i++) {
             UserStake storage s = userStakes[i];
 
-            if (s.unbondTimestamp > 0) {
+            if (s.amount != 0 && s.unbondTimestamp != 0) {
                 _cancelUnbonding(i);
             }
         }
@@ -362,7 +364,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         for (uint256 i = 0; i < userStakes.length; i++) {
             UserStake storage s = userStakes[i];
 
-            if (s.unbondTimestamp > 0 && block.timestamp >= s.unbondTimestamp) {
+            if (s.amount != 0 && s.unbondTimestamp != 0 && block.timestamp >= s.unbondTimestamp) {
                 rewards[i] = _unstake(i);
             }
         }

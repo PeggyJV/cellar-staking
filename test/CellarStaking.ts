@@ -1913,7 +1913,11 @@ describe("CellarStaking", () => {
         const preclaimBalance = preclaimBalances[signer.address];
 
         // Adjust if midstream claims/withdraws have been made
-        const adjustedExpectedReward = ethers.BigNumber.from(expectedReward).sub(claims[signer.address] || 0);
+        let adjustedExpectedReward = ethers.BigNumber.from(expectedReward).sub(claims[signer.address] || 0);
+        if (adjustedExpectedReward.lt(expectedReward.div(100))) {
+          // Round to 0 if less than 1% off
+          adjustedExpectedReward = ethers.BigNumber.from(0);
+        }
 
         await claimWithRoundedRewardCheck(staking, signer, adjustedExpectedReward);
         const postclaimBalance = await tokenDist.balanceOf(signer.address);
@@ -1945,9 +1949,7 @@ describe("CellarStaking", () => {
 
 /**
  * TODO Advanced Scenarios:
- * 1. Simple staking at different times (same locks)
- * 2. Simple staking at different times (some locks different)
  * 3. Mid-stream unbonding and unstaking
- * 4. Unstaking and re-staking
+ * 4. Unstaking and re-staking, canceled unbonding
  * 5. Unstaking, restaking, reward rate change
  */

@@ -358,7 +358,7 @@ export const setupAdvancedScenario3 = (ctx: TestContext): ScenarioInfo => {
     // At T = 0.25:  25.64            38.46            35.9               0
     // At T = 0.5:   11.11            16.67           27.78           44.44
     // At T = 0.75:  18.18                0           45.45           36.36
-    // Totals:       23.17            29.35           27.28            10.2
+    // Totals:       23.17            29.35           27.28            20.2
     // Total Deposits:
 
     const {
@@ -397,7 +397,7 @@ export const setupAdvancedScenario3 = (ctx: TestContext): ScenarioInfo => {
                     lock: lockWeek
                 },
                 {
-                    signer: user3,
+                    signer: user2,
                     amount: 0,
                     action: "unbond"
                 },
@@ -452,7 +452,7 @@ export const setupAdvancedScenario3 = (ctx: TestContext): ScenarioInfo => {
         },
         {
             signer: user4,
-            expectedReward: totalRewardsBase.mul(1020),
+            expectedReward: totalRewardsBase.mul(2020),
         },
     ];
 
@@ -1020,12 +1020,13 @@ export const runScenario = async (
             const { staking, tokenDist } = ctx;
 
             console.log("Timestamp:", timestamp);
-            console.log("Total Staked", await staking.totalDeposits());
+            console.log("Total Staked:", await (await staking.totalDeposits()).toString());
+            console.log("Total Staked With Boost:", await (await staking.totalDepositsWithBoost()).toString());
             console.log("Balances");
-            for (const user of signers.slice(0, 4)) {
-                console.log();
+            for (const user of signers.slice(1, 5)) {
                 console.log(`Wallet balance (${user.address}): ${await tokenDist.balanceOf(user.address)}`);
             }
+            console.log();
         }
     }
 
