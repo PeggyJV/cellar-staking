@@ -11,11 +11,17 @@ import { Block } from "@ethersproject/providers";
 import {
     ether,
     deploy,
+    TestContext,
     increaseTime,
     rand,
+    shuffle,
     setNextBlockTimestamp,
-    expectRoundedEqual ,
-    TestContext
+    expectRoundedEqual,
+    claimWithRoundedRewardCheck,
+    setupAdvancedScenario1,
+    setupAdvancedScenario2,
+    runScenario,
+    fundAndApprove
 } from "./utils";
 
 
@@ -1789,18 +1795,98 @@ describe("CellarStaking", () => {
       });
 
       it("should report the correct number of user stakes", async () => {
-          const { stakingUser, user } = ctx;
+        const { stakingUser, user } = ctx;
 
-          const numStakes = await stakingUser.numStakes(user.address);
-          expect(numStakes).to.equal(3);
+        const numStakes = await stakingUser.numStakes(user.address);
+        expect(numStakes).to.equal(3);
       });
     });
   });
 
-  describe("Advanced Scenarios", () => {
-      it("scenario 1", async () => {
+  describe.only("Advanced Scenarios", () => {
+    it("scenario 1", async () => {
+      const { staking, tokenDist } = ctx;
 
-      });
+      const { actions, rewards } = setupAdvancedScenario1(ctx);
+
+      await fundAndApprove(ctx);
+      await runScenario(ctx, actions);
+
+      // Now check all expected rewards and user balance
+      // Shuffle to ensure that order doesn't matter
+      const shuffledRewards = shuffle(rewards);
+      // const shuffledRewards = rewards;
+      for (const reward of shuffledRewards) {
+        const { signer, expectedReward } = reward;
+        const preclaimBalance = await tokenDist.balanceOf(signer.address);
+
+        await claimWithRoundedRewardCheck(staking, signer, expectedReward);
+        const postclaimBalance = await tokenDist.balanceOf(signer.address);
+
+        expectRoundedEqual(postclaimBalance.sub(preclaimBalance), expectedReward);
+
+        // Withdraw funds to make sure we can
+        await expect(staking.connect(signer).unbondAll()).to.not.be.reverted;
+
+        // Mine a block to wind clock
+        await ethers.provider.send("evm_increaseTime", [10]);
+      }
+
+      // Make sure all claims return 0
+      for (const reward of shuffledRewards) {
+        // Make sure another claim gives 0
+        await claimWithRoundedRewardCheck(staking, reward.signer, 0);
+      }
+
+      // Make sure we can withdraw
+      await increaseTime(oneWeekSec * 2);
+
+      for (const reward of shuffledRewards) {
+        await expect(staking.connect(reward.signer).unstakeAll()).to.not.be.reverted;
+      }
+    });
+
+    it("scenario 2", async () => {
+      const { staking, tokenDist } = ctx;
+
+      const { actions, rewards } = setupAdvancedScenario2(ctx);
+
+      await fundAndApprove(ctx);
+      await runScenario(ctx, actions);
+
+      // Now check all expected rewards and user balance
+      // Shuffle to ensure that order doesn't matter
+      const shuffledRewards = shuffle(rewards);
+      // const shuffledRewards = rewards;
+      for (const reward of shuffledRewards) {
+        const { signer, expectedReward } = reward;
+        const preclaimBalance = await tokenDist.balanceOf(signer.address);
+
+        await claimWithRoundedRewardCheck(staking, signer, expectedReward);
+        const postclaimBalance = await tokenDist.balanceOf(signer.address);
+
+        expectRoundedEqual(postclaimBalance.sub(preclaimBalance), expectedReward);
+
+        // Withdraw funds to make sure we can
+        await expect(staking.connect(signer).unbondAll()).to.not.be.reverted;
+
+        // Mine a block to wind clock
+        await ethers.provider.send("evm_increaseTime", [10]);
+      }
+
+      // Make sure all claims return 0
+      for (const reward of shuffledRewards) {
+        // Make sure another claim gives 0
+        await claimWithRoundedRewardCheck(staking, reward.signer, 0);
+      }
+
+      // Make sure we can withdraw
+      await increaseTime(oneWeekSec * 2);
+
+      for (const reward of shuffledRewards) {
+        await expect(staking.connect(reward.signer).unstakeAll()).to.not.be.reverted;
+      }
+    });
   })
 });
 

@@ -7,6 +7,7 @@ import type { SignerWithAddress } from "@nomiclabs/hardhat-ethers/dist/src/signe
 
 import type { CellarStaking } from "../src/types/CellarStaking";
 import type { MockERC20 } from "../src/types/MockERC20";
+import { Test } from "mocha";
 
 const { deployContract } = hre.waffle;
 
@@ -22,7 +23,7 @@ const lockTwoWeeks = 2;
 
 const programStart = Math.floor(Date.now() / 1000) + 10_000_000;
 const programEnd = programStart + oneMonthSec;
-const TOTAL_REWARDS = ethers.BigNumber.from(oneMonthSec);
+const TOTAL_REWARDS = ether(oneMonthSec.toString());
 
 export interface TestContext {
     admin: SignerWithAddress;
@@ -81,18 +82,6 @@ export async function setNextBlockTimestamp(epoch: number): Promise<void> {
   await ethers.provider.send("evm_mine", []);
 }
 
-// export async function rollNextEpoch(staking: CellarStaking): Promise<number> {
-
-//   const currentEpoch = (await staking.currentEpoch()).toNumber();
-//   const nextEpochIdx = currentEpoch + 1;
-
-//   const nextEpoch = await staking.rewardEpochs(nextEpochIdx);
-//   const timestamp = nextEpoch.startTimestamp.toNumber();
-//   await setNextBlockTimestamp(timestamp);
-
-//   return timestamp;
-// }
-
 export async function unbondUnstake(staking: CellarStaking, user: SignerWithAddress, depositId: number): Promise<void> {
   await staking.unbond(depositId);
   const stake = await staking.stakes(user.address, depositId);
@@ -125,6 +114,44 @@ export const expectRoundedEqual = (num: BigNumberish, target: BigNumberish, pctW
     }
 };
 
+export const claimWithRoundedRewardCheck = async (
+    staking: CellarStaking,
+    user: SignerWithAddress,
+    expectedReward: BigNumberish,
+): Promise<ContractTransaction> => {
+    const claimTx = await staking.connect(user).claimAll();
+    const receipt = await claimTx.wait();
+
+    // Cannot use expect matchers because of rounded equal comparison
+    const claimEvents = receipt.events?.filter(e => e.event === "Claim");
+
+    let reward = ethers.BigNumber.from(0);
+    for (const event of claimEvents!) {
+        expect(event).to.not.be.undefined;
+        expect(event?.args?.[0]).to.eq(user.address);
+
+        reward = reward.add(event?.args?.[2]);
+    }
+
+    expectRoundedEqual(reward, expectedReward);
+
+    return claimTx;
+};
+
+export const fundAndApprove = async (ctx: TestContext): Promise<void> => {
+    const {
+        signers,
+        tokenStake,
+        staking
+    } = ctx;
+
+    const [...users] = signers.slice(1, 5);
+
+    const stakerFunding = users.map(u => tokenStake.mint(u.address, ether("100000")));
+    const stakerApprove = users.map(u => tokenStake.connect(u).approve(staking.address, ether("100000")));
+    await Promise.all(stakerFunding.concat(stakerApprove));
+}
+
 export const setupAdvancedScenario1 = (ctx: TestContext): ScenarioInfo => {
     // Advanced Scenario 1:
     // (Different stake times, all unbond + unstake after program end, same locks)
@@ -143,7 +170,7 @@ export const setupAdvancedScenario1 = (ctx: TestContext): ScenarioInfo => {
     // Total Deposits:
 
     const {
-        signers: [user1, user2, user3, user4],
+        signers: [, user1, user2, user3, user4],
     } = ctx;
 
     const baseAmount = ether("100");
@@ -152,7 +179,7 @@ export const setupAdvancedScenario1 = (ctx: TestContext): ScenarioInfo => {
 
     const actions: Action[] = [
         {
-            timestamp: programStart - oneDaySec - 100,
+            timestamp: programStart + 5,
             actions: [
                 {
                     signer: user1,
@@ -218,6 +245,101 @@ export const setupAdvancedScenario1 = (ctx: TestContext): ScenarioInfo => {
 
     return { actions, rewards };
 };
+
+export const setupAdvancedScenario2 = (ctx: TestContext): ScenarioInfo => {
+    // Advanced Scenario 2:
+    // (Different stake times, all unbond + unstake after program end, different locks)
+    //
+    // Staker 1 Deposits N at 0 with two week lock (v = 2N)
+    // Staker 2 Deposits N/3 at 0.25 with one day lock (v = .3667N)
+    // Staker 3 Deposits 2N/3 at 0.5 with one week lock (v = .9333N)
+    // Staker 4 Deposits 2N at 0.75 with one day lock (v = 2.2N)
+    //
+    //            Staker 1 %        Staker 2 %      Staker 3 %     Staker 4 %
+    // At T = 0:      100                 0               0               0
+    // At T = 0.25:  84.5              15.5               0               0
+    // At T = 0.5:   60.6             11.11           28.28               0
+    // At T = 0.75: 36.36              6.67           16.97              40
+    // Totals:      70.37              8.32           11.31              10
+    // Total Deposits:
+
+    const {
+        signers: [, user1, user2, user3, user4],
+    } = ctx;
+
+    const baseAmount = ether("100");
+    const totalTime = oneMonthSec;
+    const totalRewardsBase = TOTAL_REWARDS.div(10000);
+
+    const actions: Action[] = [
+        {
+            timestamp: programStart + 5,
+            actions: [
+                {
+                    signer: user1,
+                    amount: baseAmount,
+                    action: "deposit",
+                    lock: lockTwoWeeks
+                },
+            ],
+        },
+        {
+            timestamp: programStart + totalTime * 0.25,
+            actions: [
+                {
+                    signer: user2,
+                    amount: baseAmount.div(3),
+                    action: "deposit",
+                    lock: lockDay
+                },
+            ],
+        },
+        {
+            timestamp: programStart + totalTime * 0.5,
+            actions: [
+                {
+                    signer: user3,
+                    amount: baseAmount.div(3).mul(2),
+                    action: "deposit",
+                    lock: lockWeek
+                },
+            ],
+        },
+        {
+            timestamp: programStart + totalTime * 0.75,
+            actions: [
+                {
+                    signer: user4,
+                    amount: baseAmount.mul(2),
+                    action: "deposit",
+                    lock: lockDay
+                },
+            ],
+        },
+    ];
+
+    const rewards: RewardInfo[] = [
+        {
+            signer: user1,
+            expectedReward: totalRewardsBase.mul(7037),
+        },
+        {
+            signer: user2,
+            expectedReward: totalRewardsBase.mul(832),
+        },
+        {
+            signer: user3,
+            expectedReward: totalRewardsBase.mul(1131),
+        },
+        {
+            signer: user4,
+            expectedReward: totalRewardsBase.mul(1000),
+        },
+    ];
+
+    return { actions, rewards };
+};
+
 
 // export const setupAdvancedScenario2 = (ctx: TestContext): ScenarioInfo => {
 //     // Advanced Scenario 2:
@@ -828,7 +950,7 @@ export const runScenario = async (
         if (haveNotified) return;
 
         await setNextBlockTimestamp(programStart);
-        await staking.notifyRewardAmount(ether("oneMonthSec"));
+        await staking.notifyRewardAmount(TOTAL_REWARDS);
         haveNotified = true;
     }
 
