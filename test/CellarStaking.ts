@@ -2057,9 +2057,3 @@ describe("CellarStaking", () => {
     });
   })
 });
-
-/**
- * TODO Advanced Scenarios:
- * 4. Unstaking and re-staking, canceled unbonding
- * 5. Unstaking, restaking, reward rate change
- */
