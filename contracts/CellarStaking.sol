@@ -8,8 +8,6 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "./Errors.sol";
 import "./interfaces/ICellarStaking.sol";
 
-import "hardhat/console.sol";
-
 /**
  * @title Sommelier Staking
  * @author Kevin Kennis

@@ -44,7 +44,7 @@ export interface Action {
 export interface ActionInfo {
     signer: SignerWithAddress;
     amount: BigNumberish;
-    action: "deposit" | "withdraw" | "unbond" | "claim";
+    action: "deposit" | "withdraw" | "unbond" | "claim" | "cancelUnbonding" | "notify";
     lock?: 0 | 1 | 2
 }
 
@@ -459,472 +459,349 @@ export const setupAdvancedScenario3 = (ctx: TestContext): ScenarioInfo => {
     return { actions, rewards };
 };
 
+export const setupAdvancedScenario4 = (ctx: TestContext): ScenarioInfo => {
+    // Advanced Scenario 4:
+    // (Midstream unbonding and unstaking, re-staking, unbonding canceled)
+    //
+    // Staker 1 Deposits N at 0 with two week lock (v = 2N)
+    // Staker 2 Deposits 3N at 0 with one day lock (v = 3.3N)
+    // Staker 3 Deposits 2N at 0 with one week lock (v = 2.8N)
+    // Staker 2 Unbonds 3N at 0.25 (v = 3N)
+    // Staker 4 Deposits 4N at 0.25 with one week lock (v = 5.6N)
+    // Staker 3 Deposits 2N at 0.25 with two week lock (v = 4N)
+    // Staker 2 Unstakes 3N at 0.5 (v = 0)
+    // Staker 4 Unbonds 4N at 0.5 (v = 4N)
+    // Staker 2 Stakes 3N at 0.75 with one-day lock (v = 3.3N)
+    // Staker 4 cancels unbonding at 0.75 (v = 5.6N)
+    // Staker 3 Unbonds 4N at 0.75 (v = 4N)
+    //
+    //            Staker 1 %        Staker 2 %      Staker 3 %     Staker 4 %
+    // At T = 0:     24.69            40.74           34.57               0
+    // At T = 0.25:  11.49            17.24           39.08           32.18
+    // At T = 0.5:   15.63                0           53.13           31.25
+    // At T = 0.75:  13.42            22.15           26.85           37.58
+    // Totals:       16.31            20.03           38.41           25.25
 
-// export const setupAdvancedScenario3 = (ctx: TestContext): ScenarioInfo => {
-//     // Advanced Scenario 3:
-//     // (Same as scenario 2, with midstream claims)
-//     //
-//     // Staker 1 Deposits N at -1000
-//     // Staker 1 Withdraws N at -500
-//     // Staker 2 Deposits 3N at 0
-//     // Staker 3 Deposits N at 0
-//     // Staker 4 Deposits 9N at 0.25
-//     // Staker 2 Withdraws 3N at 0.25
-//     // Staker 1 Deposits 2N At 0.5
-//     // Staker 4 Claims at 0.5
-//     // Staker 2 Deposits 3N at 0.75
-//     // Staker 1 Claims at 0.75
+    const {
+        signers: [, user1, user2, user3, user4],
+    } = ctx;
 
-//     //
-//     //            Staker 1 %        Staker 2 %      Staker 3 %     Staker 4 %
-//     // At T = -1000: 100                0               0               0
-//     // At T = -500:    0                0               0               0
-//     // At T = 0:       0               75              25               0
-//     // At T = 0.25:    0                0              10              90
-//     // At T = 0.5: 16.67                0            8.33              75
-//     // At T = 0.75:13.33               20            6.67              60
-//     // Totals:       7.5            23.75            12.5           56.25
+    const baseAmount = ether("100");
+    const totalTime = oneMonthSec;
+    const totalRewardsBase = TOTAL_REWARDS.div(10000);
 
-//     const {
-//         users: [user1, user2, user3, user4],
-//         start,
-//         end,
-//     } = ctx;
+    const actions: Action[] = [
+        {
+            timestamp: programStart + 5,
+            actions: [
+                {
+                    signer: user1,
+                    amount: baseAmount,
+                    action: "deposit",
+                    lock: lockTwoWeeks
+                },
+                {
+                    signer: user2,
+                    amount: baseAmount.mul(3),
+                    action: "deposit",
+                    lock: lockDay
+                },
+                {
+                    signer: user3,
+                    amount: baseAmount.mul(2),
+                    action: "deposit",
+                    lock: lockWeek
+                }
+            ],
+        },
+        {
+            timestamp: programStart + totalTime * 0.25,
+            actions: [
+                {
+                    signer: user3,
+                    amount: baseAmount.mul(2),
+                    action: "deposit",
+                    lock: lockTwoWeeks
+                },
+                {
+                    signer: user2,
+                    amount: 0,
+                    action: "unbond"
+                },
+                {
+                    signer: user4,
+                    amount: baseAmount.mul(4),
+                    action: "deposit",
+                    lock: lockWeek
+                },
+            ],
+        },
+        {
+            timestamp: programStart + totalTime * 0.5,
+            actions: [
+                {
+                    signer: user2,
+                    amount: 0,
+                    action: "withdraw"
+                },
+                {
+                    signer: user4,
+                    amount: 0,
+                    action: "unbond"
+                }
+            ],
+        },
+        {
+            timestamp: programStart + totalTime * 0.75,
+            actions: [
+                {
+                    signer: user2,
+                    amount: baseAmount.mul(3),
+                    action: "deposit",
+                    lock: lockDay
+                },
+                {
+                    signer: user4,
+                    amount: 0,
+                    action: "cancelUnbonding"
+                },
+                {
+                    signer: user3,
+                    amount: 0,
+                    action: "unbond"
+                },
+            ],
+        },
+    ];
 
-//     const baseAmount = ether("100");
-//     const totalTime = end - start;
-//     const totalRewardsBase = TOTAL_REWARDS.div(10000);
+    const rewards: RewardInfo[] = [
+        {
+            signer: user1,
+            expectedReward: totalRewardsBase.mul(1631),
+        },
+        {
+            signer: user2,
+            expectedReward: totalRewardsBase.mul(2003),
+        },
+        {
+            signer: user3,
+            expectedReward: totalRewardsBase.mul(3841),
+        },
+        {
+            signer: user4,
+            expectedReward: totalRewardsBase.mul(2525),
+        },
+    ];
 
-//     const actions: Action[] = [
-//         {
-//             timestamp: start - ONE_DAY_SEC - 5_000_000,
-//             actions: [
-//                 {
-//                     signer: user1,
-//                     amount: baseAmount,
-//                     action: "deposit",
-//                 },
-//             ],
-//         },
-//         {
-//             timestamp: start - ONE_DAY_SEC - 100_000,
-//             actions: [
-//                 {
-//                     signer: user1,
-//                     amount: 0,
-//                     action: "withdraw",
-//                 },
-//             ],
-//         },
-//         {
-//             timestamp: start - ONE_DAY_SEC - 100,
-//             actions: [
-//                 {
-//                     signer: user2,
-//                     amount: baseAmount.mul(3),
-//                     action: "deposit",
-//                 },
-//                 {
-//                     signer: user3,
-//                     amount: baseAmount,
-//                     action: "deposit",
-//                 },
-//             ],
-//         },
-//         {
-//             timestamp: start + totalTime * 0.25,
-//             actions: [
-//                 {
-//                     signer: user4,
-//                     amount: baseAmount.mul(9),
-//                     action: "deposit",
-//                 },
-//                 {
-//                     signer: user2,
-//                     amount: 0,
-//                     action: "withdraw",
-//                 },
-//             ],
-//         },
-//         {
-//             timestamp: start + totalTime * 0.5,
-//             actions: [
-//                 {
-//                     signer: user1,
-//                     amount: baseAmount.mul(2),
-//                     action: "deposit",
-//                 },
-//                 {
-//                     signer: user4,
-//                     amount: 0,
-//                     action: "claim",
-//                 },
-//             ],
-//         },
-//         {
-//             timestamp: start + totalTime * 0.75,
-//             actions: [
-//                 {
-//                     signer: user2,
-//                     amount: baseAmount.mul(3),
-//                     action: "deposit",
-//                 },
-//                 {
-//                     signer: user1,
-//                     amount: 0,
-//                     action: "claim",
-//                 },
-//             ],
-//         },
-//     ];
+    return { actions, rewards };
+};
 
-//     const rewards: RewardInfo[] = [
-//         {
-//             signer: user1,
-//             expectedReward: totalRewardsBase.mul(750),
-//         },
-//         {
-//             signer: user2,
-//             expectedReward: totalRewardsBase.mul(2375),
-//         },
-//         {
-//             signer: user3,
-//             expectedReward: totalRewardsBase.mul(1250),
-//         },
-//         {
-//             signer: user4,
-//             expectedReward: totalRewardsBase.mul(5625),
-//         },
-//     ];
+export const setupAdvancedScenario5 = (ctx: TestContext): ScenarioInfo => {
+    // Advanced Scenario 5:
+    // (Midstream unbonding and unstaking, re-staking, unbonding canceled, reward rate change)
+    //
+    // Staker 1 Deposits N at 0 with two week lock (v = 2N)
+    // Staker 2 Deposits 3N at 0 with one day lock (v = 3.3N)
+    // Staker 3 Deposits 2N at 0 with one week lock (v = 2.8N)
+    // Staker 1 Claims at 0.25
+    // Staker 2 Unbonds 3N at 0.25 (v = 3N)
+    // Staker 4 Deposits 4N at 0.25 with one week lock (v = 5.6N)
+    // Staker 3 Deposits 2N at 0.25 with two week lock (v = 4N)
+    //
+    // Reward rate changed at 0.5 (1.5x rewards put in, so rate should double)
+    //
+    // Staker 2 Unstakes 3N at 0.5 (v = 0)
+    // Staker 4 Unbonds 4N at 0.5 (v = 4N)
+    // Staker 1 Claims at 0.5
+    // Staker 1 Unbonds at 0.5 (v = N)
+    // Staker 4 cancels unbonding at 0.75 (v = 5.6N)
+    // Staker 3 Unbonds 4N at 0.75 (v = 4N)
+    // Staker 4 Unbonds at 1 (v = 4N)
+    // Staker 3 Unstakes at 1 (v = 0)
+    // Staker 2 Stakes 3N at 1 with one-day lock (v = 3.3N)
+    // Staker 3 Deposits N at 1.25 with two week lock (v = 2N)
+    // Staker 2 Unbonds at 1.25 (v = 3N)
+    // Staker 1 Unstakes at 1.25 (v = 0)
+    //
+    //
+    //            Staker 1 %        Staker 2 %      Staker 3 %     Staker 4 %
+    // At T = 0:     24.69            40.74           34.57               0
+    // At T = 0.25:  11.49            17.24           39.08           32.18
+    // At T = 0.5:    8.47                0           57.63           33.90     (x2 weight)
+    // At T = 0.75:   9.43                0           37.73           52.83     (x2 weight)
+    // At T = 1:     12.05            39.76               0           48.19     (x2 weight)
+    // At T = 1.25:      0            33.33           22.22           44.44     (x2 weight)
+    // Totals:        9.61            20.42           30.88           39.09
 
-//     return { actions, rewards };
-// };
+    const {
+        signers: [admin, user1, user2, user3, user4],
+    } = ctx;
 
-// export const setupAdvancedScenario4 = (ctx: TestContext): ScenarioInfo => {
-//     // Advanced Scenario :
-//     // Multiple deposits for same user, midstream claims, with DAO fee of 4%
-//     //
-//     // Staker 1 Deposits N at 0
-//     // Staker 2 Deposits 2N at 0
-//     // Staker 1 Deposits N at 0.25
-//     // Staker 3 Deposits 2N at 0.5
-//     // Staker 2 Withdraws at 0.5
-//     // Staker 1 Deposits N at 0.5
-//     // Staker 4 Deposits 3N at 0.75
-//     // Staker 1 Claims at 0.75
-//     //
-//     //            Staker 1 %        Staker 2 %      Staker 3 %     Staker 4 %
-//     // At T = 0:   33.33            66.67               0               0
-//     // At T = 0.25:   50               50               0               0
-//     // At T = 0.5:    60                0              40               0
-//     // At T = 0.75: 37.5                0              25            37.5
-//     // Totals:   45.2075          29.1667           16.25           9.375
+    const baseAmount = ether("100");
+    const totalTime = oneMonthSec;
+    const totalRewardsBase = TOTAL_REWARDS.div(10).mul(25).div(10000);
 
-//     const {
-//         users: [user1, user2, user3, user4],
-//         start,
-//         end,
-//     } = ctx;
+    const actions: Action[] = [
+        {
+            timestamp: programStart + 5,
+            actions: [
+                {
+                    signer: user1,
+                    amount: baseAmount,
+                    action: "deposit",
+                    lock: lockTwoWeeks
+                },
+                {
+                    signer: user2,
+                    amount: baseAmount.mul(3),
+                    action: "deposit",
+                    lock: lockDay
+                },
+                {
+                    signer: user3,
+                    amount: baseAmount.mul(2),
+                    action: "deposit",
+                    lock: lockWeek
+                }
+            ],
+        },
+        {
+            timestamp: programStart + totalTime * 0.25,
+            actions: [
+                {
+                    signer: user1,
+                    amount: 0,
+                    action: "claim"
+                },
+                {
+                    signer: user3,
+                    amount: baseAmount.mul(2),
+                    action: "deposit",
+                    lock: lockTwoWeeks
+                },
+                {
+                    signer: user2,
+                    amount: 0,
+                    action: "unbond"
+                },
+                {
+                    signer: user4,
+                    amount: baseAmount.mul(4),
+                    action: "deposit",
+                    lock: lockWeek
+                },
+            ],
+        },
+        {
+            timestamp: programStart + totalTime * 0.5,
+            actions: [
+                {
+                    signer: admin,
+                    amount: TOTAL_REWARDS.div(10).mul(15),
+                    action: "notify"
+                },
+                {
+                    signer: user2,
+                    amount: 0,
+                    action: "withdraw"
+                },
+                {
+                    signer: user4,
+                    amount: 0,
+                    action: "unbond"
+                },
+                {
+                    signer: user1,
+                    amount: 0,
+                    action: "claim",
+                },
+                {
+                    signer: user1,
+                    amount: 0,
+                    action: "unbond"
+                }
+            ],
+        },
+        {
+            timestamp: programStart + totalTime * 0.75,
+            actions: [
+                {
+                    signer: user4,
+                    amount: 0,
+                    action: "cancelUnbonding"
+                },
+                {
+                    signer: user3,
+                    amount: 0,
+                    action: "unbond"
+                },
+            ],
+        },
+        {
+            timestamp: programStart + totalTime,
+            actions: [
+                {
+                    signer: user4,
+                    amount: 0,
+                    action: "unbond"
+                },
+                {
+                    signer: user3,
+                    amount: 0,
+                    action: "withdraw"
+                },
+                {
+                    signer: user2,
+                    amount: baseAmount.mul(3),
+                    action: "deposit",
+                    lock: lockDay
+                },
+            ],
+        },
+        {
+            timestamp: programStart + totalTime * 1.25,
+            actions: [
+                {
+                    signer: user2,
+                    amount: 0,
+                    action: "unbond"
+                },
+                {
+                    signer: user1,
+                    amount: 0,
+                    action: "withdraw"
+                },
+                {
+                    signer: user3,
+                    amount: baseAmount,
+                    action: "deposit",
+                    lock: lockTwoWeeks
+                },
+            ],
+        }
+    ];
 
-//     const baseAmount = ether("100");
-//     const totalTime = end - start;
-//     const totalRewardsBase = TOTAL_REWARDS.div(1000000);
+    const rewards: RewardInfo[] = [
+        {
+            signer: user1,
+            expectedReward: totalRewardsBase.mul(961),
+        },
+        {
+            signer: user2,
+            expectedReward: totalRewardsBase.mul(2042),
+        },
+        {
+            signer: user3,
+            expectedReward: totalRewardsBase.mul(3088),
+        },
+        {
+            signer: user4,
+            expectedReward: totalRewardsBase.mul(3909),
+        },
+    ];
 
-//     const actions: Action[] = [
-//         {
-//             timestamp: start - ONE_DAY_SEC - 100,
-//             actions: [
-//                 {
-//                     signer: user1,
-//                     amount: baseAmount,
-//                     action: "deposit",
-//                 },
-//                 {
-//                     signer: user2,
-//                     amount: baseAmount.mul(2),
-//                     action: "deposit",
-//                 },
-//             ],
-//         },
-//         {
-//             timestamp: start + totalTime * 0.25,
-//             actions: [
-//                 {
-//                     signer: user1,
-//                     amount: baseAmount,
-//                     action: "deposit",
-//                 },
-//             ],
-//         },
-//         {
-//             timestamp: start + totalTime * 0.5,
-//             actions: [
-//                 {
-//                     signer: user2,
-//                     amount: 0,
-//                     action: "withdraw",
-//                 },
-//                 {
-//                     signer: user3,
-//                     amount: baseAmount.mul(2),
-//                     action: "deposit",
-//                 },
-//                 {
-//                     signer: user1,
-//                     amount: baseAmount,
-//                     action: "deposit",
-//                 },
-//             ],
-//         },
-//         {
-//             timestamp: start + totalTime * 0.75,
-//             actions: [
-//                 {
-//                     signer: user1,
-//                     amount: 0,
-//                     action: "claim",
-//                 },
-//                 {
-//                     signer: user4,
-//                     amount: baseAmount.mul(3),
-//                     action: "deposit",
-//                 },
-//             ],
-//         },
-//     ];
-
-//     const rewards: RewardInfo[] = [
-//         {
-//             signer: user1,
-//             expectedReward: totalRewardsBase.mul(452075).div(100).mul(96),
-//         },
-//         {
-//             signer: user2,
-//             expectedReward: totalRewardsBase.mul(291667).div(100).mul(96),
-//         },
-//         {
-//             signer: user3,
-//             expectedReward: totalRewardsBase.mul(162500).div(100).mul(96),
-//         },
-//         {
-//             signer: user4,
-//             expectedReward: totalRewardsBase.mul(93750).div(100).mul(96),
-//         },
-//     ];
-
-//     return { actions, rewards };
-// };
-
-// export const setupAdvancedScenario5 = (ctx: TestContext, stakers: [AtlasMineStaker, AtlasMineStaker]): ScenarioInfo => {
-//     // Advanced Scenario 5:
-//     // (Multiple deposits for same user, midstream claims, 2 stakers, one NFT boosted)
-//     //
-//     // Pool 1 - 1/1 Legion NFT for 2x boost, 210% boost total
-//     // Staker 1 Deposits N at 0
-//     // Staker 2 Deposits 2N at 0
-//     // Staker 1 Deposits N at 0.25
-//     // Staker 3 Deposits 2N at 0.5
-//     // Staker 2 Withdraws 2N at 0.5
-//     // Staker 1 Deposits N at 0.5
-//     // Staker 4 Deposits 3N at 0.75
-//     // Staker 1 Claims at 0.75
-//     //
-//     // Pool 2 - No NFT, 10% boost total
-//     // Staker 2 Deposits 3N at 0
-//     // Staker 3 Deposits N at 0
-//     // Staker 4 Deposits 9N at 0.25
-//     // Staker 2 Withdraws 3N at 0.25
-//     // Staker 1 Deposits 2N At 0.5
-//     // Staker 2 Deposits 3N at 0.75
-//     // Staker 1 Claims at 0.75
-//     //
-//     // Pool 1:
-//     //            Staker 1 %        Staker 2 %      Staker 3 %     Staker 4 %
-//     // At T = 0:   33.33            66.67               0               0
-//     // At T = 0.25:   50               50               0               0
-//     // At T = 0.5:    60                0              40               0
-//     // At T = 0.75: 37.5                0              25            37.5
-//     // Totals:   45.2075          29.1667           16.25           9.375
-//     //
-//     // Pool 2:
-//     //
-//     // At T = 0:       0               75              25               0
-//     // At T = 0.25:    0                0              10              90
-//     // At T = 0.5: 16.67                0            8.33              75
-//     // At T = 0.75:13.33               20            6.67              60
-//     // Totals:       7.5            23.75            12.5           56.25
-//     //
-//     // Combined (Per Pool - no Boosts):
-//     // At T = 0:    42.86            57.14
-//     // At T = 0.25: 28.57            71.43
-//     // At T = 0.5:  29.41            70.58
-//     // At T = 0.75: 34.78            65.22
-//     // Total:       33.91            66.09
-//     //
-//     // Combined (Per Pool - with NFT boosts):
-//     //            Pool 1 %        Pool 2 %
-//     // At T = 0:       60               40
-//     // At T = 0.25: 44.44            55.55
-//     // At T = 0.5:  45.45            54.54
-//     // At T = 0.75: 51.61            48.39
-//     //
-//     ///////////////// Combined (Per Pool - Adjusted for 10% Lock Boost to both pools):
-//     /////////////////            Pool 1 %        Pool 2 %
-//     ///////////////// At T = 0:    58.88            41.12
-//     ///////////////// At T = 0.25: 43.30            56.70
-//     ///////////////// At T = 0.5:  44.30            55.70
-//     ///////////////// At T = 0.75: 50.45            49.55
-//     ///////////////// Total:       49.23            50.77
-//     //
-//     // Combined (Per User):
-//     //            Staker 1 %     Staker 2 %      Staker 3 %      Staker 4 %
-//     // At T = 0:     19.62             70.1           10.28               0
-//     // At T = 0.25:  21.65            21.65            5.67           51.03
-//     // At T = 0.5:   35.87                0           22.36           41.78
-//     // At T = 0.75:  25.52             9.91           15.92           48.65
-//     // Totals:      25.665           25.415         13.5575          35.365
-
-//     const {
-//         users: [user1, user2, user3, user4],
-//         start,
-//         end,
-//     } = ctx;
-
-//     const baseAmount = ether("100");
-//     const totalTime = end - start;
-//     const totalRewardsBase = TOTAL_REWARDS.div(1000000);
-
-//     const actions: Action[] = [
-//         {
-//             timestamp: start - ONE_DAY_SEC - 100,
-//             actions: [
-//                 {
-//                     signer: user1,
-//                     amount: baseAmount,
-//                     action: "deposit",
-//                     staker: stakers[0],
-//                 },
-//                 {
-//                     signer: user2,
-//                     amount: baseAmount.mul(3),
-//                     action: "deposit",
-//                     staker: stakers[1],
-//                 },
-//                 {
-//                     signer: user2,
-//                     amount: baseAmount.mul(2),
-//                     action: "deposit",
-//                     staker: stakers[0],
-//                 },
-//                 {
-//                     signer: user3,
-//                     amount: baseAmount,
-//                     action: "deposit",
-//                     staker: stakers[1],
-//                 },
-//             ],
-//         },
-//         {
-//             timestamp: start + totalTime * 0.25,
-//             actions: [
-//                 {
-//                     signer: user4,
-//                     amount: baseAmount.mul(9),
-//                     action: "deposit",
-//                     staker: stakers[1],
-//                 },
-//                 {
-//                     signer: user2,
-//                     amount: 0,
-//                     action: "withdraw",
-//                     staker: stakers[1],
-//                 },
-//                 {
-//                     signer: user1,
-//                     amount: baseAmount,
-//                     action: "deposit",
-//                     staker: stakers[0],
-//                 },
-//             ],
-//         },
-//         {
-//             timestamp: start + totalTime * 0.5,
-//             actions: [
-//                 {
-//                     signer: user2,
-//                     amount: 0,
-//                     action: "withdraw",
-//                     staker: stakers[0],
-//                 },
-//                 {
-//                     signer: user3,
-//                     amount: baseAmount.mul(2),
-//                     action: "deposit",
-//                     staker: stakers[0],
-//                 },
-//                 {
-//                     signer: user1,
-//                     amount: baseAmount,
-//                     action: "deposit",
-//                     staker: stakers[0],
-//                 },
-//                 {
-//                     signer: user1,
-//                     amount: baseAmount.mul(2),
-//                     action: "deposit",
-//                     staker: stakers[1],
-//                 },
-//             ],
-//         },
-//         {
-//             timestamp: start + totalTime * 0.75,
-//             actions: [
-//                 {
-//                     signer: user1,
-//                     amount: 0,
-//                     action: "claim",
-//                     staker: stakers[0],
-//                 },
-//                 {
-//                     signer: user4,
-//                     amount: baseAmount.mul(3),
-//                     action: "deposit",
-//                     staker: stakers[0],
-//                 },
-//                 {
-//                     signer: user2,
-//                     amount: baseAmount.mul(3),
-//                     action: "deposit",
-//                     staker: stakers[1],
-//                 },
-//             ],
-//         },
-//     ];
-
-//     const combinedRewards: RewardInfo[] = [
-//         {
-//             signer: user1,
-//             expectedReward: totalRewardsBase.mul(256650),
-//         },
-//         {
-//             signer: user2,
-//             expectedReward: totalRewardsBase.mul(254150),
-//         },
-//         {
-//             signer: user3,
-//             expectedReward: totalRewardsBase.mul(135575),
-//         },
-//         {
-//             signer: user4,
-//             expectedReward: totalRewardsBase.mul(353650),
-//         },
-//     ];
-
-//     return {
-//         actions,
-//         rewards: combinedRewards,
-//     };
-// };
+    return { actions, rewards };
+};
 
 export const runScenario = async (
     ctx: TestContext,
@@ -938,11 +815,11 @@ export const runScenario = async (
 
     await staking.setRewardsDuration(oneMonthSec);
 
-    const doNotify = async () => {
+    const doNotify = async (rewards: BigNumberish) => {
         if (haveNotified) return;
 
         await setNextBlockTimestamp(programStart);
-        await staking.notifyRewardAmount(TOTAL_REWARDS);
+        await staking.notifyRewardAmount(rewards);
         haveNotified = true;
     }
 
@@ -952,7 +829,7 @@ export const runScenario = async (
 
         // Make deposit
         if (timestamp > programStart) {
-            await doNotify();
+            await doNotify(TOTAL_REWARDS);
         }
 
         await setNextBlockTimestamp(timestamp);
@@ -987,7 +864,8 @@ export const runScenario = async (
             } else if (action === "unbond") {
                 // No need to roll, just claim - keep track of amount rewarded
                 tx = await staking.connect(signer).unbondAll();
-                await tx.wait();
+            } else if (action === "cancelUnbonding") {
+                tx = await staking.connect(signer).cancelUnbondingAll();
             } else if (action === "withdraw") {
                 // No need to roll, just claim - keep track of amount rewarded
                 tx = await staking.connect(signer).unstakeAll();
@@ -1008,6 +886,8 @@ export const runScenario = async (
                 } else {
                     claims[signer.address] = reward;
                 }
+            } else if (action === "notify") {
+                tx = await staking.notifyRewardAmount(amount);
             }
         }
 

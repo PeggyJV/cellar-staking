@@ -23,7 +23,8 @@ import {
     setupAdvancedScenario2,
     runScenario,
     fundAndApprove,
-    setupAdvancedScenario3
+    setupAdvancedScenario3,
+    setupAdvancedScenario4
 } from "./utils";
 
 
@@ -1805,7 +1806,7 @@ describe("CellarStaking", () => {
     });
   });
 
-  describe.only("Advanced Scenarios", () => {
+  describe("Advanced Scenarios", () => {
     it("scenario 1", async () => {
       const { staking, tokenDist } = ctx;
 
@@ -1944,12 +1945,121 @@ describe("CellarStaking", () => {
         await expect(staking.connect(reward.signer).unstakeAll()).to.not.be.reverted;
       }
     });
+
+    it("scenario 4", async () => {
+      const { staking, tokenDist } = ctx;
+
+      const { actions, rewards } = setupAdvancedScenario4(ctx);
+
+      await fundAndApprove(ctx);
+
+      const preclaimBalances: { [user: string]: BigNumberish } = {};
+      for (const { signer } of rewards) {
+        preclaimBalances[signer.address] = await tokenDist.balanceOf(signer.address);
+      }
+
+      const claims = await runScenario(ctx, actions);
+
+      // Now check all expected rewards and user balance
+      // Shuffle to ensure that order doesn't matter
+      const shuffledRewards = shuffle(rewards);
+      // const shuffledRewards = rewards;
+      for (const reward of shuffledRewards) {
+        const { signer, expectedReward } = reward;
+        const preclaimBalance = preclaimBalances[signer.address];
+
+        // Adjust if midstream claims/withdraws have been made
+        let adjustedExpectedReward = ethers.BigNumber.from(expectedReward).sub(claims[signer.address] || 0);
+        if (adjustedExpectedReward.lt(expectedReward.div(100))) {
+          // Round to 0 if less than 1% off
+          adjustedExpectedReward = ethers.BigNumber.from(0);
+        }
+
+        await claimWithRoundedRewardCheck(staking, signer, adjustedExpectedReward);
+        const postclaimBalance = await tokenDist.balanceOf(signer.address);
+
+        expectRoundedEqual(postclaimBalance.sub(preclaimBalance), expectedReward);
+
+        // Withdraw funds to make sure we can
+        await expect(staking.connect(signer).unbondAll()).to.not.be.reverted;
+
+        // Mine a block to wind clock
+        await ethers.provider.send("evm_increaseTime", [10]);
+      }
+
+      // Make sure all claims return 0
+      for (const reward of shuffledRewards) {
+        // Make sure another claim gives 0
+        await claimWithRoundedRewardCheck(staking, reward.signer, 0);
+      }
+
+      // Make sure we can withdraw
+      await increaseTime(oneWeekSec * 2);
+
+      for (const reward of shuffledRewards) {
+        await expect(staking.connect(reward.signer).unstakeAll()).to.not.be.reverted;
+      }
+    });
+
+    it("scenario 5", async () => {
+      const { staking, tokenDist } = ctx;
+
+      const { actions, rewards } = setupAdvancedScenario4(ctx);
+
+      await fundAndApprove(ctx);
+
+      const preclaimBalances: { [user: string]: BigNumberish } = {};
+      for (const { signer } of rewards) {
+        preclaimBalances[signer.address] = await tokenDist.balanceOf(signer.address);
+      }
+
+      const claims = await runScenario(ctx, actions);
+
+      // Now check all expected rewards and user balance
+      // Shuffle to ensure that order doesn't matter
+      const shuffledRewards = shuffle(rewards);
+      // const shuffledRewards = rewards;
+      for (const reward of shuffledRewards) {
+        const { signer, expectedReward } = reward;
+        const preclaimBalance = preclaimBalances[signer.address];
+
+        // Adjust if midstream claims/withdraws have been made
+        let adjustedExpectedReward = ethers.BigNumber.from(expectedReward).sub(claims[signer.address] || 0);
+        if (adjustedExpectedReward.lt(expectedReward.div(100))) {
+          // Round to 0 if less than 1% off
+          adjustedExpectedReward = ethers.BigNumber.from(0);
+        }
+
+        await claimWithRoundedRewardCheck(staking, signer, adjustedExpectedReward);
+        const postclaimBalance = await tokenDist.balanceOf(signer.address);
+
+        expectRoundedEqual(postclaimBalance.sub(preclaimBalance), expectedReward);
+
+        // Withdraw funds to make sure we can
+        await expect(staking.connect(signer).unbondAll()).to.not.be.reverted;
+
+        // Mine a block to wind clock
+        await ethers.provider.send("evm_increaseTime", [10]);
+      }
+
+      // Make sure all claims return 0
+      for (const reward of shuffledRewards) {
+        // Make sure another claim gives 0
+        await claimWithRoundedRewardCheck(staking, reward.signer, 0);
+      }
+
+      // Make sure we can withdraw
+      await increaseTime(oneWeekSec * 2);
+
+      for (const reward of shuffledRewards) {
+        await expect(staking.connect(reward.signer).unstakeAll()).to.not.be.reverted;
+      }
+    });
   })
 });
 
 /**
  * TODO Advanced Scenarios:
- * 3. Mid-stream unbonding and unstaking
  * 4. Unstaking and re-staking, canceled unbonding
  * 5. Unstaking, restaking, reward rate change
  */
