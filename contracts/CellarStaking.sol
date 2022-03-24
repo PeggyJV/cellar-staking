@@ -151,7 +151,7 @@ contract CellarStaking is ICellarStaking, Ownable {
     bool public override claimable;
 
     /// @notice Tracks if an address can call notifyReward()
-    mapping(address => bool) public isRewardDistributor;
+    mapping(address => bool) public override isRewardDistributor;
 
     // ============= User State ==============
 
@@ -241,7 +241,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         for (uint256 i = 0; i < userStakes.length; i++) {
             UserStake storage s = userStakes[i];
 
-            if (s.unbondTimestamp == 0) {
+            if (s.amount != 0 && s.unbondTimestamp == 0) {
                 _unbond(i);
             }
         }
@@ -298,7 +298,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         for (uint256 i = 0; i < userStakes.length; i++) {
             UserStake storage s = userStakes[i];
 
-            if (s.unbondTimestamp > 0) {
+            if (s.amount != 0 && s.unbondTimestamp != 0) {
                 _cancelUnbonding(i);
             }
         }
@@ -362,7 +362,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         for (uint256 i = 0; i < userStakes.length; i++) {
             UserStake storage s = userStakes[i];
 
-            if (s.unbondTimestamp > 0 && block.timestamp >= s.unbondTimestamp) {
+            if (s.amount != 0 && s.unbondTimestamp != 0 && block.timestamp >= s.unbondTimestamp) {
                 rewards[i] = _unstake(i);
             }
         }
@@ -655,6 +655,18 @@ contract CellarStaking is ICellarStaking, Ownable {
         return rewardPerTokenStored + newRewardsPerToken;
     }
 
+    /**
+     * @notice Returns the number of stakes for a user. Can be used off-chain to
+     *         make iterating through user stakes easier.
+     *
+     * @param user                      The user to count stakes for.
+     *
+     * @return stakes                   The number of stakes for the user.
+     */
+    function numStakes(address user) public view override returns (uint256) {
+        return stakes[user].length;
+    }
+
     // ============================================ HELPERS ============================================
 
     /**
@@ -704,6 +716,7 @@ contract CellarStaking is ICellarStaking, Ownable {
     function _earned(UserStake memory s) internal view returns (uint256) {
         uint256 rewardPerTokenAcc = rewardPerTokenStored - s.rewardPerTokenPaid;
         uint256 newRewards = s.amountWithBoost * (rewardPerTokenAcc / ONE);
+
         return newRewards;
     }
 

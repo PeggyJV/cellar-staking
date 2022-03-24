@@ -1,114 +1,21 @@
-# Solidity Template
+# 🔒💰 Cellar LP Bonding
 
-My favorite setup for writing Solidity smart contracts.
+An extension of canonical ERC20 staking patterns for Sommelier LP bonding rewards programs. Unlike other ERC20 staking pools, Sommelier also uses a 'bonding' mechanism, inspired party by [Osmosis](https://osmosis.zone/).
 
-- [Hardhat](https://github.com/nomiclabs/hardhat): compile and run the smart contracts on a local development network
-- [TypeChain](https://github.com/ethereum-ts/TypeChain): generate TypeScript types for smart contracts
-- [Ethers](https://github.com/ethers-io/ethers.js/): renowned Ethereum library and wallet implementation
-- [Waffle](https://github.com/EthWorks/Waffle): tooling for writing comprehensive smart contract tests
-- [Solhint](https://github.com/protofire/solhint): linter
-- [Solcover](https://github.com/sc-forks/solidity-coverage): code coverage
-- [Prettier Plugin Solidity](https://github.com/prettier-solidity/prettier-plugin-solidity): code formatter
+When staking, users must choose an "unbonding" time - this is the cooldown period a user must wait to claim their tokens after electing to unstake. Higher unbonding periods/cooldown times receive higher reward boosts.
 
-This is a GitHub template, which means you can reuse it as many times as you want. You can do that by clicking the "Use this
-template" button at the top of the page.
+## Features
 
-## Usage
+* 🏦 Admins can set the length of a rewards epoch and fund a certain amount of rewards, starting an epoch.
+* ⬇️ Users can stake coins in the bonding program, choosing 1-day, 7-day, or 14-day bonding. User's stakes receives multipliers based on bonding period. For instance, a deposit of 100 LP shares with a 2-week unbonding period will receive the equivalent of 200 LP shares deposited with no boost.
+* 🎁 Users begin to accumulate rewards as soon as their stake is deposited.
+* 🎊 Users can claim accumulated rewards at any time.
+* ⏲️ Users can begin unbonding period at any time, starting the cooldown timer. Once unbonding, any time-based boosts are removed. Users cannot edit their unbonding period after staking.
+* ❌ After beginning to unbond, users can cancel unbonding at any time, moving the cooldown timer back to 0 and reinstating any time-based boosts.
+* ⬆️ After unbonding, users can return after the cooldown period to claim their deposited tokens, along with rewards.
 
-### Pre Requisites
+Full technical documentation can be read in the code's natspec.
+## Project Architecture
 
-Before running any command, you need to create a `.env` file and set a BIP-39 compatible mnemonic as an environment
-variable. Follow the example in `.env.example`. If you don't already have a mnemonic, use this [website](https://iancoleman.io/bip39/) to generate one.
+Template copied from kkennis' Hardhat template - see [template README](https://github.com/kkennis/solidity-template) for generalized project instrutions.
 
-Then, proceed with installing dependencies:
-
-```sh
-yarn install
-```
-
-### Compile
-
-Compile the smart contracts with Hardhat:
-
-```sh
-$ yarn compile
-```
-
-### TypeChain
-
-Compile the smart contracts and generate TypeChain artifacts:
-
-```sh
-$ yarn typechain
-```
-
-### Lint Solidity
-
-Lint the Solidity code:
-
-```sh
-$ yarn lint:sol
-```
-
-### Lint TypeScript
-
-Lint the TypeScript code:
-
-```sh
-$ yarn lint:ts
-```
-
-### Test
-
-Run the Mocha tests:
-
-```sh
-$ yarn test
-```
-
-### Coverage
-
-Generate the code coverage report:
-
-```sh
-$ yarn coverage
-```
-
-### Report Gas
-
-See the gas usage per unit test and average gas per method call:
-
-```sh
-$ REPORT_GAS=true yarn test
-```
-
-### Clean
-
-Delete the smart contract artifacts, the coverage reports and the Hardhat cache:
-
-```sh
-$ yarn clean
-```
-
-### Deploy
-
-Deploy the contracts to Hardhat Network:
-
-```sh
-$ yarn deploy --greeting "Bonjour, le monde!"
-```
-
-## Syntax Highlighting
-
-If you use VSCode, you can enjoy syntax highlighting for your Solidity code via the
-[vscode-solidity](https://github.com/juanfranblanco/vscode-solidity) extension. The recommended approach to set the
-compiler version is to add the following fields to your VSCode user settings:
-
-```json
-{
-  "solidity.compileUsingRemoteVersion": "v0.8.4+commit.c7e474f2",
-  "solidity.defaultCompiler": "remote"
-}
-```
-
-Where of course `v0.8.4+commit.c7e474f2` can be replaced with any other version.
