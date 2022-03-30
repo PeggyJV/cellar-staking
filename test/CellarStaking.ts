@@ -54,7 +54,20 @@ describe("CellarStaking", () => {
     await tokenDist.mint(admin.address, initialTokenAmount);
 
     // Bootstrap CellarStaking contract
-    const params = [admin.address, admin.address, tokenStake.address, tokenDist.address, oneMonthSec];
+    const params = [
+      admin.address,
+      admin.address,
+      tokenStake.address,
+      tokenDist.address,
+      oneMonthSec,
+      ether("0.1"),
+      ether("0.4"),
+      ether("1"),
+      oneDaySec,
+      oneWeekSec,
+      oneWeekSec * 2
+    ];
+
     const staking = <CellarStaking>await deploy("CellarStaking", admin, params);
     const stakingUser = await staking.connect(user);
 
@@ -160,21 +173,21 @@ describe("CellarStaking", () => {
         await expect(stakingUser.stake(stakeAmount, lockTwoWeeks)).to.not.be.reverted;
 
         let stake = await stakingUser.stakes(user.address, 0);
-        let boostMultiplier = stakeAmount.mul(await stakingUser.ONE_DAY_BOOST()).div(ether("1"));
+        let boostMultiplier = stakeAmount.mul(await stakingUser.SHORT_BOOST()).div(ether("1"));
         let expectedAmountWithBoost = stakeAmount.add(boostMultiplier);
 
         expect(stake.amount).to.equal(stakeAmount);
         expect(stake.amountWithBoost).to.equal(expectedAmountWithBoost);
 
         stake = await stakingUser.stakes(user.address, 1);
-        boostMultiplier = stakeAmount.mul(await stakingUser.ONE_WEEK_BOOST()).div(ether("1"));
+        boostMultiplier = stakeAmount.mul(await stakingUser.MEDIUM_BOOST()).div(ether("1"));
         expectedAmountWithBoost = stakeAmount.add(boostMultiplier);
 
         expect(stake.amount).to.equal(stakeAmount);
         expect(stake.amountWithBoost).to.equal(expectedAmountWithBoost);
 
         stake = await stakingUser.stakes(user.address, 2);
-        boostMultiplier = stakeAmount.mul(await stakingUser.TWO_WEEKS_BOOST()).div(ether("1"));
+        boostMultiplier = stakeAmount.mul(await stakingUser.LONG_BOOST()).div(ether("1"));
         expectedAmountWithBoost = stakeAmount.add(boostMultiplier);
 
         expect(stake.amount).to.equal(stakeAmount);
@@ -449,7 +462,7 @@ describe("CellarStaking", () => {
         const { stakingUser, user } = ctx;
 
         const stake = await stakingUser.stakes(user.address, 0);
-        const boostMultiplier = stakeAmount.mul(await stakingUser.ONE_DAY_BOOST()).div(ether("1"));
+        const boostMultiplier = stakeAmount.mul(await stakingUser.SHORT_BOOST()).div(ether("1"));
         const expectedAmountWithBoost = stakeAmount.add(boostMultiplier);
         expect(stake.amount).to.equal(stakeAmount);
         expect(stake.amountWithBoost).to.equal(expectedAmountWithBoost);
@@ -573,7 +586,7 @@ describe("CellarStaking", () => {
         const { stakingUser, user } = ctx;
 
         const stake = await stakingUser.stakes(user.address, 0);
-        const boostMultiplier = stakeAmount.mul(await stakingUser.ONE_DAY_BOOST()).div(ether("1"));
+        const boostMultiplier = stakeAmount.mul(await stakingUser.SHORT_BOOST()).div(ether("1"));
         const expectedAmountWithBoost = stakeAmount.add(boostMultiplier);
         expect(stake.amount).to.equal(stakeAmount);
         expect(stake.amountWithBoost).to.equal(expectedAmountWithBoost);
@@ -651,7 +664,7 @@ describe("CellarStaking", () => {
 
         // Check all stakes match original
         let stake = await stakingUser.stakes(user.address, 0);
-        let boostMultiplier = stakeAmount.mul(await stakingUser.ONE_DAY_BOOST()).div(ether("1"));
+        let boostMultiplier = stakeAmount.mul(await stakingUser.SHORT_BOOST()).div(ether("1"));
         let expectedAmountWithBoost = stakeAmount.add(boostMultiplier);
 
         expect(stake.amount).to.equal(stakeAmount);
@@ -660,7 +673,7 @@ describe("CellarStaking", () => {
         expect(stake.lock).to.equal(lockDay);
 
         stake = await stakingUser.stakes(user.address, 1);
-        boostMultiplier = stakeAmount.mul(await stakingUser.ONE_WEEK_BOOST()).div(ether("1"));
+        boostMultiplier = stakeAmount.mul(await stakingUser.MEDIUM_BOOST()).div(ether("1"));
         expectedAmountWithBoost = stakeAmount.add(boostMultiplier);
 
         expect(stake.amount).to.equal(stakeAmount);
@@ -669,7 +682,7 @@ describe("CellarStaking", () => {
         expect(stake.lock).to.equal(lockWeek);
 
         stake = await stakingUser.stakes(user.address, 2);
-        boostMultiplier = stakeAmount.mul(await stakingUser.TWO_WEEKS_BOOST()).div(ether("1"));
+        boostMultiplier = stakeAmount.mul(await stakingUser.LONG_BOOST()).div(ether("1"));
         expectedAmountWithBoost = stakeAmount.add(boostMultiplier);
 
         expect(stake.amount).to.equal(stakeAmount);
@@ -1759,7 +1772,7 @@ describe("CellarStaking", () => {
         const { stakingUser, user } = ctx;
 
         const stake1 = await stakingUser.stakes(user.address, 0);
-        let boostMultiplier = stakeAmount.mul(await stakingUser.ONE_DAY_BOOST()).div(ether("1"));
+        let boostMultiplier = stakeAmount.mul(await stakingUser.SHORT_BOOST()).div(ether("1"));
         let expectedAmountWithBoost = stakeAmount.add(boostMultiplier);
 
         expect(stake1.amount).to.equal(stakeAmount);
@@ -1771,7 +1784,7 @@ describe("CellarStaking", () => {
         const stake2 = await stakingUser.stakes(user.address, 1);
         boostMultiplier = stakeAmount
           .mul(2)
-          .mul(await stakingUser.ONE_WEEK_BOOST())
+          .mul(await stakingUser.MEDIUM_BOOST())
           .div(ether("1"));
         expectedAmountWithBoost = stakeAmount.mul(2).add(boostMultiplier);
 
@@ -1784,7 +1797,7 @@ describe("CellarStaking", () => {
         const stake3 = await stakingUser.stakes(user.address, 2);
         boostMultiplier = stakeAmount
           .mul(3)
-          .mul(await stakingUser.TWO_WEEKS_BOOST())
+          .mul(await stakingUser.LONG_BOOST())
           .div(ether("1"));
         expectedAmountWithBoost = stakeAmount.mul(3).add(boostMultiplier);
 

@@ -125,9 +125,13 @@ contract CellarStaking is ICellarStaking, Ownable {
     uint256 public constant TWO_WEEKS = ONE_WEEK * 2;
     uint256 public constant MAX_UINT = 2**256 - 1;
 
-    uint256 public constant ONE_DAY_BOOST = 1e17; // 10% boost
-    uint256 public constant ONE_WEEK_BOOST = 4e17; // 40% boost
-    uint256 public constant TWO_WEEKS_BOOST = 1e18; // 100% boost
+    uint256 public immutable SHORT_BOOST;
+    uint256 public immutable MEDIUM_BOOST;
+    uint256 public immutable LONG_BOOST;
+
+    uint256 public immutable SHORT_BOOST_TIME;
+    uint256 public immutable MEDIUM_BOOST_TIME;
+    uint256 public immutable LONG_BOOST_TIME;
 
     // ============ Global State =============
 
@@ -171,12 +175,26 @@ contract CellarStaking is ICellarStaking, Ownable {
         address _rewardsDistribution,
         ERC20 _stakingToken,
         ERC20 _distributionToken,
-        uint256 _epochDuration
+        uint256 _epochDuration,
+        uint256 shortBoost,
+        uint256 mediumBoost,
+        uint256 longBoost,
+        uint256 shortBoostTime,
+        uint256 mediumBoostTime,
+        uint256 longBoostTime
     ) {
         stakingToken = _stakingToken;
         isRewardDistributor[_rewardsDistribution] = true;
         distributionToken = _distributionToken;
         epochDuration = _epochDuration;
+
+        SHORT_BOOST = shortBoost;
+        MEDIUM_BOOST = mediumBoost;
+        LONG_BOOST = longBoost;
+
+        SHORT_BOOST_TIME = shortBoostTime;
+        MEDIUM_BOOST_TIME = mediumBoostTime;
+        LONG_BOOST_TIME = longBoostTime;
 
         transferOwnership(_owner);
     }
@@ -722,13 +740,13 @@ contract CellarStaking is ICellarStaking, Ownable {
     /**
      * @dev Maps Lock enum values to corresponding lengths of time and reward boosts.
      */
-    function _getBoost(Lock _lock) internal pure returns (uint256 boost, uint256 timelock) {
-        if (_lock == Lock.day) {
-            return (ONE_DAY_BOOST, ONE_DAY);
-        } else if (_lock == Lock.week) {
-            return (ONE_WEEK_BOOST, ONE_WEEK);
-        } else if (_lock == Lock.twoWeeks) {
-            return (TWO_WEEKS_BOOST, TWO_WEEKS);
+    function _getBoost(Lock _lock) internal view returns (uint256 boost, uint256 timelock) {
+        if (_lock == Lock.short) {
+            return (SHORT_BOOST, SHORT_BOOST_TIME);
+        } else if (_lock == Lock.medium) {
+            return (MEDIUM_BOOST, MEDIUM_BOOST_TIME);
+        } else if (_lock == Lock.long) {
+            return (LONG_BOOST, LONG_BOOST_TIME);
         } else {
             revert USR_InvalidLockValue(uint256(_lock));
         }

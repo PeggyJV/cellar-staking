@@ -27,9 +27,9 @@ interface ICellarStaking {
     // ===================== Structs ======================
 
     enum Lock {
-        day,
-        week,
-        twoWeeks
+        short,
+        medium,
+        long
     }
 
     struct UserStake {
