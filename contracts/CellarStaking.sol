@@ -201,14 +201,16 @@ contract CellarStaking is ICellarStaking, Ownable {
         (uint256 boost, ) = _getBoost(lock);
         uint256 amountWithBoost = amount + ((amount * boost) / ONE);
 
-        stakes[msg.sender].push(UserStake({
-            amount: amount,
-            amountWithBoost: amountWithBoost,
-            rewardPerTokenPaid: rewardPerTokenStored,
-            rewards: 0,
-            unbondTimestamp: 0,
-            lock: lock
-        }));
+        stakes[msg.sender].push(
+            UserStake({
+                amount: amount,
+                amountWithBoost: amountWithBoost,
+                rewardPerTokenPaid: rewardPerTokenStored,
+                rewards: 0,
+                unbondTimestamp: 0,
+                lock: lock
+            })
+        );
 
         // Update global state
         totalDeposits += amount;
@@ -631,10 +633,7 @@ contract CellarStaking is ICellarStaking, Ownable {
      * @return timestamp           The latest time to calculate.
      */
     function latestRewardsTimestamp() public view override returns (uint256) {
-        return
-            block.timestamp < endTimestamp
-                ? block.timestamp
-                : endTimestamp;
+        return block.timestamp < endTimestamp ? block.timestamp : endTimestamp;
     }
 
     /**
@@ -650,21 +649,22 @@ contract CellarStaking is ICellarStaking, Ownable {
 
         uint256 timeElapsed = latestRewardsTimestamp() - lastAccountingTimestamp;
         uint256 rewardsForTime = timeElapsed * rewardRate;
-        uint256 newRewardsPerToken = rewardsForTime * ONE / totalDepositsWithBoost;
+        uint256 newRewardsPerToken = (rewardsForTime * ONE) / totalDepositsWithBoost;
 
         return rewardPerTokenStored + newRewardsPerToken;
     }
 
     /**
-     * @notice Returns the number of stakes for a user. Can be used off-chain to
-     *         make iterating through user stakes easier.
+     * @notice Gets all of a user's stakes.
+     * @dev This is provided because Solidity converts public arrays into index getters,
+     *      but we need a way to allow external contracts and users to access the whole array.
+
+     * @param user                      The user whose stakes to get.
      *
-     * @param user                      The user to count stakes for.
-     *
-     * @return stakes                   The number of stakes for the user.
+     * @return stakes                   Array of all user's stakes
      */
-    function numStakes(address user) public view override returns (uint256) {
-        return stakes[user].length;
+    function getUserStakes(address user) public view override returns (UserStake[] memory) {
+        return stakes[user];
     }
 
     // ============================================ HELPERS ============================================

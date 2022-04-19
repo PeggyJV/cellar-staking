@@ -113,5 +113,5 @@ interface ICellarStaking {
 
     function rewardPerToken() external view returns (uint256);
 
-    function numStakes(address user) external view returns (uint256);
+    function getUserStakes(address user) external view returns (UserStake[] memory);
 }
