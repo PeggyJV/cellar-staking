@@ -33,11 +33,11 @@ interface ICellarStaking {
     }
 
     struct UserStake {
-        uint256 amount;
-        uint256 amountWithBoost;
-        uint256 rewardPerTokenPaid;
-        uint256 rewards;
-        uint256 unbondTimestamp;
+        uint112 amount;
+        uint112 amountWithBoost;
+        uint112 rewardPerTokenPaid;
+        uint112 rewards;
+        uint32 unbondTimestamp;
         Lock lock;
     }
 
