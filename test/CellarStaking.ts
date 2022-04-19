@@ -740,7 +740,7 @@ describe("CellarStaking", () => {
         const prevBal = await tokenDist.balanceOf(user.address);
 
         const stake = await stakingUser.stakes(user.address, 0);
-        await setNextBlockTimestamp(stake.unbondTimestamp.toNumber() + 1);
+        await setNextBlockTimestamp(stake.unbondTimestamp + 1);
 
         const tx = await stakingUser.unstake(0);
         const receipt = await tx.wait();
@@ -767,7 +767,7 @@ describe("CellarStaking", () => {
         const prevBal = await tokenStake.balanceOf(user.address);
 
         const stake = await stakingUser.stakes(user.address, 0);
-        await setNextBlockTimestamp(stake.unbondTimestamp.toNumber() + 1);
+        await setNextBlockTimestamp(stake.unbondTimestamp + 1);
 
         await stakingUser.unstake(0);
 
@@ -785,7 +785,7 @@ describe("CellarStaking", () => {
         const prevBal = await tokenStake.balanceOf(user.address);
 
         const stake = await stakingUser.stakes(user.address, 0);
-        await setNextBlockTimestamp(stake.unbondTimestamp.toNumber() + 1);
+        await setNextBlockTimestamp(stake.unbondTimestamp + 1);
 
         await stakingUser.unstake(0);
 
@@ -851,7 +851,7 @@ describe("CellarStaking", () => {
         const prevDistBalUser2 = await tokenDist.balanceOf(user2.address);
 
         const stake = await stakingUser.stakes(user.address, 0);
-        await setNextBlockTimestamp(stake.unbondTimestamp.toNumber() + 1);
+        await setNextBlockTimestamp(stake.unbondTimestamp + 1);
 
         await stakingUser.unstakeAll();
         await stakingUser2.unstakeAll();
