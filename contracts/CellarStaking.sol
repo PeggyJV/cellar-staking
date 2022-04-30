@@ -655,15 +655,16 @@ contract CellarStaking is ICellarStaking, Ownable {
     }
 
     /**
-     * @notice Returns the number of stakes for a user. Can be used off-chain to
-     *         make iterating through user stakes easier.
+     * @notice Gets all of a user's stakes.
+     * @dev This is provided because Solidity converts public arrays into index getters,
+     *      but we need a way to allow external contracts and users to access the whole array.
+
+     * @param user                      The user whose stakes to get.
      *
-     * @param user                      The user to count stakes for.
-     *
-     * @return stakes                   The number of stakes for the user.
+     * @return stakes                   Array of all user's stakes
      */
-    function numStakes(address user) public view override returns (uint256) {
-        return stakes[user].length;
+    function getUserStakes(address user) public view override returns (UserStake[] memory) {
+        return stakes[user];
     }
 
     // ============================================ HELPERS ============================================

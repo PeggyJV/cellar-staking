@@ -10,24 +10,22 @@ import type { CellarStaking } from "../src/types/CellarStaking";
 import type { MockERC20 } from "../src/types/MockERC20";
 import { Block } from "@ethersproject/providers";
 import {
-    ether,
-    deploy,
-    TestContext,
-    increaseTime,
-    rand,
-    shuffle,
-    setNextBlockTimestamp,
-    expectRoundedEqual,
-    claimWithRoundedRewardCheck,
-    setupAdvancedScenario1,
-    setupAdvancedScenario2,
-    runScenario,
-    fundAndApprove,
-    setupAdvancedScenario3,
-    setupAdvancedScenario4
+  ether,
+  deploy,
+  TestContext,
+  increaseTime,
+  rand,
+  shuffle,
+  setNextBlockTimestamp,
+  expectRoundedEqual,
+  claimWithRoundedRewardCheck,
+  setupAdvancedScenario1,
+  setupAdvancedScenario2,
+  runScenario,
+  fundAndApprove,
+  setupAdvancedScenario3,
+  setupAdvancedScenario4,
 } from "./utils";
-
-
 
 const oneDaySec = 60 * 60 * 24;
 const oneWeekSec = oneDaySec * 7;
@@ -1797,11 +1795,11 @@ describe("CellarStaking", () => {
         expect(stake3.lock).to.equal(lockTwoWeeks);
       });
 
-      it("should report the correct number of user stakes", async () => {
+      it("should report all a user's stakes", async () => {
         const { stakingUser, user } = ctx;
 
-        const numStakes = await stakingUser.numStakes(user.address);
-        expect(numStakes).to.equal(3);
+        const userStakes = await stakingUser.getUserStakes(user.address);
+        expect(userStakes.length).to.equal(3);
       });
     });
   });
@@ -2055,5 +2053,5 @@ describe("CellarStaking", () => {
         await expect(staking.connect(reward.signer).unstakeAll()).to.not.be.reverted;
       }
     });
-  })
+  });
 });
