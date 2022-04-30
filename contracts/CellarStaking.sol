@@ -203,9 +203,9 @@ contract CellarStaking is ICellarStaking, Ownable {
 
         stakes[msg.sender].push(
             UserStake({
-                amount: amount,
-                amountWithBoost: amountWithBoost,
-                rewardPerTokenPaid: rewardPerTokenStored,
+                amount: uint112(amount),
+                amountWithBoost: uint112(amountWithBoost),
+                rewardPerTokenPaid: uint112(rewardPerTokenStored),
                 rewards: 0,
                 unbondTimestamp: 0,
                 lock: lock
@@ -270,10 +270,10 @@ contract CellarStaking is ICellarStaking, Ownable {
         uint256 depositAmountReduced = s.amountWithBoost - depositAmount;
         (, uint256 lockDuration) = _getBoost(s.lock);
 
-        s.amountWithBoost = depositAmount;
-        s.unbondTimestamp = block.timestamp + lockDuration;
+        s.amountWithBoost = uint112(depositAmount);
+        s.unbondTimestamp = uint32(block.timestamp + lockDuration);
 
-        totalDepositsWithBoost -= depositAmountReduced;
+        totalDepositsWithBoost -= uint112(depositAmountReduced);
 
         emit Unbond(msg.sender, depositId, depositAmount);
     }
@@ -328,7 +328,7 @@ contract CellarStaking is ICellarStaking, Ownable {
         uint256 amountWithBoost = s.amount + (s.amount * boost) / ONE;
         uint256 depositAmountIncreased = amountWithBoost - s.amountWithBoost;
 
-        s.amountWithBoost = amountWithBoost;
+        s.amountWithBoost = uint112(amountWithBoost);
         s.unbondTimestamp = 0;
 
         totalDepositsWithBoost += depositAmountIncreased;
@@ -705,9 +705,9 @@ contract CellarStaking is ICellarStaking, Ownable {
         if (s.amount == 0) return;
 
         uint256 earned = _earned(s);
-        s.rewards += earned;
+        s.rewards += uint112(earned);
 
-        s.rewardPerTokenPaid = rewardPerTokenStored;
+        s.rewardPerTokenPaid = uint112(rewardPerTokenStored);
     }
 
     /**
