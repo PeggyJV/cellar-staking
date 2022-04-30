@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.8.10;
 
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
-
+import {ERC20} from "@rari-capital/solmate/src/tokens/ERC20.sol";
+import {SafeTransferLib} from "@rari-capital/solmate/src/utils/SafeTransferLib.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {ICellarStaking} from "./interfaces/ICellarStaking.sol";
 import "./Errors.sol";
-import "./interfaces/ICellarStaking.sol";
 
 /**
  * @title Sommelier Staking
@@ -114,7 +113,7 @@ import "./interfaces/ICellarStaking.sol";
  *
  */
 contract CellarStaking is ICellarStaking, Ownable {
-    using SafeERC20 for ERC20;
+    using SafeTransferLib for ERC20;
 
     // ============================================ STATE ==============================================
 
