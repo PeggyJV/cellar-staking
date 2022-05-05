@@ -71,13 +71,6 @@ error USR_ZeroRewardsPerEpoch();
  */
 error USR_InvalidLockValue(uint256 lock);
 
-/**
- * @notice The caller attempted to call a reward distribution function,
- *         but was not the designated distributor.
- *
- */
-error USR_NotDistributor();
-
 // ==================================================================================================
 // ===========================                STATE ERRORS               ============================
 // ==================================================================================================

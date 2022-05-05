@@ -56,7 +56,6 @@ describe("CellarStaking", () => {
     // Bootstrap CellarStaking contract
     const params = [
       admin.address,
-      admin.address,
       tokenStake.address,
       tokenDist.address,
       oneMonthSec,
@@ -71,8 +70,8 @@ describe("CellarStaking", () => {
     const staking = <CellarStaking>await deploy("CellarStaking", admin, params);
     const stakingUser = await staking.connect(user);
 
-    // Allow staking contract to transfer rewardsfor distribution
-    await tokenDist.increaseAllowance(staking.address, initialTokenAmount);
+    // Fund staking contract with rewards
+    await tokenDist.mint(staking.address, initialTokenAmount);
 
     // Allow staking contract to transfer on behalf of user
     const tokenStakeUser = await tokenStake.connect(user);
@@ -1351,26 +1350,23 @@ describe("CellarStaking", () => {
       beforeEach(async () => {
         const totalRewards = ether(String(20_000_000));
 
-        distributor = ctx.signers[5];
+        distributor = ctx.admin;
         await ctx.tokenDist.mint(distributor.address, totalRewards);
-        await ctx.tokenDist.connect(distributor).approve(ctx.staking.address, totalRewards);
-
-        await ctx.staking.setRewardsDistribution(distributor.address, true);
 
         stakingDist = await ctx.connectUser(distributor);
       });
 
-      it("should revert if caller is not the reward distributor", async () => {
+      it("should revert if caller is not the owner", async () => {
         const { stakingUser } = ctx;
 
-        await expect(stakingUser.notifyRewardAmount(ether("100"))).to.be.revertedWith("USR_NotDistributor");
+        await expect(stakingUser.notifyRewardAmount(ether("100"))).to.be.revertedWith("Ownable: caller is not the owner");
       });
 
-      it("should revert if caller is the owner but not the reward distributor", async () => {
-        const { staking } = ctx;
-        await staking.setRewardsDistribution(await staking.signer.getAddress(), false);
+      it("should revert if the staking contract is not funded with enough tokens", async () => {
+        // Schedule very large program
+        const largeAmount = ether("1").mul(BigNumber.from(10).pow(50));
 
-        await expect(staking.notifyRewardAmount(ether("100"))).to.be.revertedWith("USR_NotDistributor");
+        await expect(stakingDist.notifyRewardAmount(largeAmount)).to.be.revertedWith("STATE_RewardsNotFunded");
       });
 
       it("should revert if the the reward is less than one base unit per second", async () => {
@@ -1378,7 +1374,10 @@ describe("CellarStaking", () => {
       });
 
       it("should revert if the the reward amount may cause overflow", async () => {
+        const { tokenDist, staking } = ctx;
+
         const largeAmount = ether("1").mul(BigNumber.from(10).pow(50));
+        await tokenDist.mint(staking.address, largeAmount);
 
         await expect(stakingDist.notifyRewardAmount(largeAmount)).to.be.revertedWith("USR_RewardTooLarge");
       });
@@ -1390,6 +1389,7 @@ describe("CellarStaking", () => {
         const rewards = ether(oneMonthSec.toString());
         const balanceBefore = await tokenDist.balanceOf(distributor.address);
 
+        await tokenDist.connect(distributor).transfer(stakingDist.address, rewards);
         const tx = await stakingDist.notifyRewardAmount(rewards);
         const receipt = await tx.wait();
         const latestBlock = await ethers.provider.getBlock("latest");
@@ -1403,7 +1403,7 @@ describe("CellarStaking", () => {
         // Check reward rate, end timestamp, and balances
         expect(await stakingDist.rewardRate()).to.equal(ether("1"));
         expect(await stakingDist.endTimestamp()).to.equal(latestBlock.timestamp + oneMonthSec);
-        expect(await tokenDist.balanceOf(stakingDist.address)).to.equal(rewards);
+        expect(await tokenDist.balanceOf(stakingDist.address)).to.equal(initialTokenAmount.add(rewards));
 
         const balanceAfter = await tokenDist.balanceOf(distributor.address);
 
@@ -1416,6 +1416,7 @@ describe("CellarStaking", () => {
         // Equates to one unit per second distributed
         const rewards = ether(oneMonthSec.toString());
         const balanceBefore = await tokenDist.balanceOf(distributor.address);
+        await tokenDist.connect(distributor).transfer(stakingDist.address, rewards);
 
         await expect(stakingDist.notifyRewardAmount(rewards)).to.not.be.reverted;
         let latestBlock = await ethers.provider.getBlock("latest");
@@ -1424,7 +1425,7 @@ describe("CellarStaking", () => {
 
         expect(await stakingDist.rewardRate()).to.equal(ether("1"));
         expect(await stakingDist.endTimestamp()).to.equal(latestBlock.timestamp + oneMonthSec);
-        expect(await tokenDist.balanceOf(stakingDist.address)).to.equal(rewards);
+        expect(await tokenDist.balanceOf(stakingDist.address)).to.equal(initialTokenAmount.add(rewards));
 
         // Run halfway through, then start a new rewards period
         await increaseTime(oneMonthSec / 2);
@@ -1432,6 +1433,8 @@ describe("CellarStaking", () => {
         // Have someone claim
         await stakingUser.claimAll();
 
+        // Transfer in and notify more rewards
+        await tokenDist.connect(distributor).transfer(stakingDist.address, rewards);
         await expect(stakingDist.notifyRewardAmount(rewards)).to.not.be.reverted;
         latestBlock = await ethers.provider.getBlock("latest");
 
@@ -1441,69 +1444,12 @@ describe("CellarStaking", () => {
         // Period should be reset
         expect(await stakingDist.endTimestamp()).to.equal(latestBlock.timestamp + oneMonthSec);
 
-        expectRoundedEqual(await tokenDist.balanceOf(stakingDist.address), rewards.div(2).mul(3));
+        expectRoundedEqual(await tokenDist.balanceOf(stakingDist.address), initialTokenAmount.add(rewards.div(2).mul(3)));
 
         const balanceAfter = await tokenDist.balanceOf(distributor.address);
 
         // Funded twice
         expect(balanceBefore.sub(balanceAfter)).to.equal(rewards.mul(2));
-      });
-    });
-
-    describe("setRewardsDistribution", () => {
-      let distributor: SignerWithAddress;
-      let stakingDist: CellarStaking;
-
-      beforeEach(async () => {
-        const totalRewards = ether(String(20_000_000));
-
-        distributor = ctx.signers[5];
-
-        await ctx.tokenDist.mint(distributor.address, totalRewards);
-        await ctx.tokenDist.connect(distributor).approve(ctx.staking.address, totalRewards);
-
-        stakingDist = await ctx.connectUser(distributor);
-      });
-
-      it("should revert if caller is not the owner", async () => {
-        const { stakingUser } = ctx;
-
-        await expect(stakingUser.setRewardsDistribution(stakingUser.address, true)).to.be.revertedWith(
-          "Ownable: caller is not the owner",
-        );
-      });
-
-      it("should set a reward distributor", async () => {
-        const { staking } = ctx;
-
-        await expect(staking.setRewardsDistribution(distributor.address, true))
-          .to.emit(staking, "DistributorSet")
-          .withArgs(distributor.address, true);
-
-        expect(await staking.isRewardDistributor(distributor.address)).to.be.true;
-
-        // Make sure they can distribute
-        await expect(stakingDist.notifyRewardAmount(oneMonthSec)).to.not.be.reverted;
-      });
-
-      it("should unset a reward distributor", async () => {
-        const { staking } = ctx;
-
-        await expect(staking.setRewardsDistribution(distributor.address, true))
-          .to.emit(staking, "DistributorSet")
-          .withArgs(distributor.address, true);
-
-        // Make sure they can distribute
-        expect(await staking.isRewardDistributor(distributor.address)).to.be.true;
-        await expect(stakingDist.notifyRewardAmount(oneMonthSec)).to.not.be.reverted;
-
-        // Unset
-        await expect(staking.setRewardsDistribution(distributor.address, false))
-          .to.emit(staking, "DistributorSet")
-          .withArgs(distributor.address, false);
-
-        expect(await staking.isRewardDistributor(distributor.address)).to.be.false;
-        await expect(stakingDist.notifyRewardAmount(oneMonthSec)).to.be.revertedWith("USR_NotDistributor");
       });
     });
 
@@ -1640,9 +1586,12 @@ describe("CellarStaking", () => {
       it("should end the contract and return distribution tokens if rewards are not claimable", async () => {
         const { admin, staking, stakingUser, tokenDist } = ctx;
 
+        // Make sure contract only has oneMonthSecTokens
         const originalBalance = await tokenDist.balanceOf(admin.address);
+        await tokenDist.connect(admin).transfer(staking.address, oneMonthSec);
         await staking.notifyRewardAmount(oneMonthSec);
         const balanceAfterFunding = await tokenDist.balanceOf(admin.address);
+
         expect(originalBalance.sub(balanceAfterFunding)).to.equal(oneMonthSec);
 
         await stakingUser.stake(ether("10"), lockDay);
@@ -1658,7 +1607,7 @@ describe("CellarStaking", () => {
 
         // Should get all coins back, since stakingUser never claimed
         const balanceAfterStop = await tokenDist.balanceOf(admin.address);
-        expect(originalBalance).to.equal(balanceAfterStop);
+        expect(originalBalance).to.equal(balanceAfterStop.sub(initialTokenAmount));
 
         await expect(stakingUser.emergencyUnstake()).to.not.be.revertedWith("STATE_NoEmergencyUnstake");
         await expect(stakingUser.emergencyClaim()).to.be.revertedWith("STATE_NoEmergencyClaim");
