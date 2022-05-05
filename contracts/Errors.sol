@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+   // SPDX-License-Identifier: MIT
 pragma solidity >=0.8.4;
 
 // ==================================================================================================
@@ -85,6 +85,15 @@ error USR_NotDistributor();
 ///
 /// These errors do not relate to user input, and may or may not be resolved by other actions
 ///     or the progression of time.
+
+/**
+ * @notice The caller attempted to start a reward period, but the contract did not have enough tokens
+ *         for the specified amount of rewards.
+ *
+ * @param rewardBalance         The amount of distributionToken held by the contract.
+ * @param reward                The amount of rewards the caller attempted to distribute.
+ */
+error STATE_RewardsNotFunded(uint256 rewardBalance, uint256 reward);
 
 /**
  * @notice The caller attempted to change the epoch length, but current reward epochs were active.

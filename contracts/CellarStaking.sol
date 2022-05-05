@@ -22,7 +22,7 @@ import "./Errors.sol";
  * *********************************** Funding Flow ***********************************
  *
  * 1) The contract owner calls 'notifyRewardAmount' to specify an initial schedule of rewards
- *    The contract collects the distribution token from the owner to fund the
+ *    The contract should hold enough the distribution token to fund the
  *    specified reward schedule, where the length of the reward schedule is defined by
  *    epochDuration. This duration can also be changed by the owner, and any change will apply
  *    to future calls to 'notifyRewardAmount' (but will not affect active schedules).
@@ -153,9 +153,6 @@ contract CellarStaking is ICellarStaking, Ownable {
     bool public override ended;
     bool public override claimable;
 
-    /// @notice Tracks if an address can call notifyReward()
-    mapping(address => bool) public override isRewardDistributor;
-
     // ============= User State ==============
 
     /// @notice user => all user's staking positions
@@ -165,14 +162,18 @@ contract CellarStaking is ICellarStaking, Ownable {
 
     /**
      * @param _owner                The owner of the staking contract - will immediately receive ownership.
-     * @param _rewardsDistribution  The address allowed to schedule new rewards.
      * @param _stakingToken         The token users will deposit in order to stake.
      * @param _distributionToken    The token the staking contract will distribute as rewards.
      * @param _epochDuration        The length of a reward schedule.
+     * @param shortBoost            The boost multiplier for the short unbonding time.
+     * @param mediumBoost           The boost multiplier for the medium unbonding time.
+     * @param longBoost             The boost multiplier for the long unbonding time.
+     * @param shortBoostTime        The short unbonding time.
+     * @param mediumBoostTime       The medium unbonding time.
+     * @param longBoostTime         The long unbonding time.
      */
     constructor(
         address _owner,
-        address _rewardsDistribution,
         ERC20 _stakingToken,
         ERC20 _distributionToken,
         uint256 _epochDuration,
@@ -184,7 +185,6 @@ contract CellarStaking is ICellarStaking, Ownable {
         uint256 longBoostTime
     ) {
         stakingToken = _stakingToken;
-        isRewardDistributor[_rewardsDistribution] = true;
         distributionToken = _distributionToken;
         epochDuration = _epochDuration;
 
@@ -545,13 +545,17 @@ contract CellarStaking is ICellarStaking, Ownable {
     // ======================================== ADMIN OPERATIONS ========================================
 
     /**
-     * @notice Specify a new schedule for staking rewards.
+     * @notice Specify a new schedule for staking rewards. Contract must already hold enough tokens.
      * @dev    Can only be called by reward distributor. Owner must approve distributionToken for withdrawal.
+     * @dev    epochDuration must divide reward evenly, otherwise any remainder will be lost.
      *
      * @param reward                The amount of rewards to distribute per second.
      */
-    function notifyRewardAmount(uint256 reward) external override onlyRewardsDistribution updateRewards {
+    function notifyRewardAmount(uint256 reward) external override onlyOwner updateRewards {
         if (reward < epochDuration) revert USR_ZeroRewardsPerEpoch();
+
+        uint256 rewardBalance = distributionToken.balanceOf(address(this));
+        if (rewardBalance < reward) revert STATE_RewardsNotFunded(rewardBalance, reward);
 
         if (block.timestamp >= endTimestamp) {
             // Set new rate bc previous has already expired
@@ -568,9 +572,6 @@ contract CellarStaking is ICellarStaking, Ownable {
         }
 
         endTimestamp = block.timestamp + epochDuration;
-
-        // Source rewards
-        distributionToken.safeTransferFrom(msg.sender, address(this), reward);
 
         emit Funding(reward, endTimestamp);
     }
@@ -629,19 +630,6 @@ contract CellarStaking is ICellarStaking, Ownable {
         emit EmergencyStop(msg.sender, makeRewardsClaimable);
     }
 
-    /**
-     * @notice Set the EOA or contract allowed to call 'notifyRewardAmount' to schedule
-     *         new rewards.
-     *
-     * @param _rewardsDistribution  The new reward distributor.
-     * @param _set                  Whether the address should be allowed to distribute.
-     */
-    function setRewardsDistribution(address _rewardsDistribution, bool _set) external override onlyOwner {
-        isRewardDistributor[_rewardsDistribution] = _set;
-
-        emit DistributorSet(_rewardsDistribution, _set);
-    }
-
     // ======================================= STATE INFORMATION =======================================
 
     /**
@@ -685,15 +673,6 @@ contract CellarStaking is ICellarStaking, Ownable {
     }
 
     // ============================================ HELPERS ============================================
-
-    /**
-     * @dev Can only be called by the designated reward distributor
-     */
-    modifier onlyRewardsDistribution() {
-        if (!isRewardDistributor[msg.sender]) revert USR_NotDistributor();
-
-        _;
-    }
 
     /**
      * @dev Update reward accounting for the global state totals.
