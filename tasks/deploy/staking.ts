@@ -16,27 +16,35 @@ task("deploy:CellarStaking")
     console.log("Deployer balance: ", (await deployer.getBalance()).toString());
 
     const OPERATOR = deployer.address;
-    const LP_SHARE = "0x7A9E1403fBb6C2AA0C180B976f688997E63FDA2c";    // AAVE Cellar
     const SOMM_TOKEN = "0xa670d7237398238DE01267472C6f13e5B8010FD1";
 
     const factory = <CellarStaking__factory>await ethers.getContractFactory("CellarStaking");
 
-    const staking = <CellarStaking>await factory.deploy(
-      OPERATOR,                         // gravity (deployer for now)
-      LP_SHARE,                         // cellar lp token
-      SOMM_TOKEN,                       // SOMM ERC20 token
-      60 * 60 * 24 * 30,                // 30 days,
-      ethers.utils.parseUnits("0.1"),   // 10% short boost
-      ethers.utils.parseUnits("0.3"),   // 30% medium boost
-      ethers.utils.parseUnits("0.5"),   // 50% long boost
-      oneWeekSec,                       // 1-week short locktime
-      oneWeekSec * 2,                   // 2-week medium locktime
-      oneWeekSec * 3,                   // 3-week long locktime
-    );
+    const tokens = [
+      { name: "ETHBTCMOM", address: "0x6E2dAc3b9E9ADc0CbbaE2D0B9Fd81952a8D33872" }, // ETHBTCMOM
+      { name: "ETHBTCTREND", address: "0x6b7f87279982d919Bbf85182DDeAB179B366D8f2" }, // ETHBTCTREND
+    ];
 
-    await staking.deployed();
+    for (const token of tokens) {
+      const staking = <CellarStaking>await factory.deploy(
+        OPERATOR,                         // gravity (deployer for now)
+        token.address,                    // cellar lp token
+        SOMM_TOKEN,                       // SOMM ERC20 token
+        60 * 60 * 24 * 14,                // 14 days,
+        ethers.utils.parseUnits("0.3"),   // 30% short boost (0.75 factor)
+        ethers.utils.parseUnits("0.4"),   // 40% medium boost (1 factor)
+        ethers.utils.parseUnits("0.44"),  // 44% medium boost (1.1 factor)
+        oneDaySec * 10,                   // 10-day short locktime
+        oneDaySec * 14,                   // 14-day medium locktime
+        oneDaySec * 20,                   // 20-day long locktime
+      );
 
-    console.log("CellarStaking deployed to: ", staking.address);
+      await staking.deployed();
 
-    // Gravity needs to call notifyRewardAmount to start staking program
+      console.log(`CellarStaking ${token.name} deployed to: `, staking.address);
+    }
+
+    // Gravity needs to call:
+    // - set
+    // - notifyRewardAmount to start staking program
   });

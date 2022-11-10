@@ -22,7 +22,7 @@ import "./Errors.sol";
  * *********************************** Funding Flow ***********************************
  *
  * 1) The contract owner calls 'notifyRewardAmount' to specify an initial schedule of rewards
- *    The contract should hold enough the distribution token to fund the
+ *    The contract should hold enough of the distribution token to fund the
  *    specified reward schedule, where the length of the reward schedule is defined by
  *    epochDuration. This duration can also be changed by the owner, and any change will apply
  *    to future calls to 'notifyRewardAmount' (but will not affect active schedules).
