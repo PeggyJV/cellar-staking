@@ -15,7 +15,7 @@ task("deploy:CellarStaking")
     console.log("Deployer address: ", deployer.address);
     console.log("Deployer balance: ", (await deployer.getBalance()).toString());
 
-    const OPERATOR = deployer.address;
+    const OPERATOR = "0x7340D1FeCD4B64A4ac34f826B21c945d44d7407F"; // multisig
     const SOMM_TOKEN = "0xa670d7237398238DE01267472C6f13e5B8010FD1";
 
     const factory = <CellarStaking__factory>await ethers.getContractFactory("CellarStaking");

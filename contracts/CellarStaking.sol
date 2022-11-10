@@ -1,10 +1,11 @@
-// SPDX-License-Identifier: MIT
-pragma solidity >=0.8.10;
+// SPDX-License-Identifier: Apache-2.0
+pragma solidity 0.8.15;
 
-import {ERC20} from "@rari-capital/solmate/src/tokens/ERC20.sol";
-import {SafeTransferLib} from "@rari-capital/solmate/src/utils/SafeTransferLib.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {ICellarStaking} from "./interfaces/ICellarStaking.sol";
+import { ERC20 } from "solmate/src/tokens/ERC20.sol";
+import { SafeTransferLib } from "solmate/src/utils/SafeTransferLib.sol";
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { ICellarStaking } from "./interfaces/ICellarStaking.sol";
+
 import "./Errors.sol";
 
 /**
@@ -22,7 +23,7 @@ import "./Errors.sol";
  * *********************************** Funding Flow ***********************************
  *
  * 1) The contract owner calls 'notifyRewardAmount' to specify an initial schedule of rewards
- *    The contract should hold enough of the distribution token to fund the
+ *    The contract should hold enough the distribution token to fund the
  *    specified reward schedule, where the length of the reward schedule is defined by
  *    epochDuration. This duration can also be changed by the owner, and any change will apply
  *    to future calls to 'notifyRewardAmount' (but will not affect active schedules).
@@ -123,7 +124,6 @@ contract CellarStaking is ICellarStaking, Ownable {
     uint256 public constant ONE_DAY = 60 * 60 * 24;
     uint256 public constant ONE_WEEK = ONE_DAY * 7;
     uint256 public constant TWO_WEEKS = ONE_WEEK * 2;
-    uint256 public constant MAX_UINT = 2**256 - 1;
 
     uint256 public immutable SHORT_BOOST;
     uint256 public immutable MEDIUM_BOOST;
@@ -137,7 +137,9 @@ contract CellarStaking is ICellarStaking, Ownable {
 
     ERC20 public immutable override stakingToken;
     ERC20 public immutable override distributionToken;
-    uint256 public override epochDuration;
+    uint256 public override currentEpochDuration;
+    uint256 public override nextEpochDuration;
+    uint256 public override rewardsReady;
 
     uint256 public override minimumDeposit;
     uint256 public override endTimestamp;
@@ -186,7 +188,7 @@ contract CellarStaking is ICellarStaking, Ownable {
     ) {
         stakingToken = _stakingToken;
         distributionToken = _distributionToken;
-        epochDuration = _epochDuration;
+        nextEpochDuration = _epochDuration;
 
         SHORT_BOOST = shortBoost;
         MEDIUM_BOOST = mediumBoost;
@@ -212,7 +214,16 @@ contract CellarStaking is ICellarStaking, Ownable {
     function stake(uint256 amount, Lock lock) external override whenNotPaused updateRewards {
         if (amount == 0) revert USR_ZeroDeposit();
         if (amount < minimumDeposit) revert USR_MinimumDeposit(amount, minimumDeposit);
-        if (block.timestamp > endTimestamp) revert STATE_NoRewardsLeft();
+
+        if (totalDeposits == 0 && rewardsReady > 0) {
+            _startProgram(rewardsReady);
+            rewardsReady = 0;
+
+            // Need to run updateRewards again
+            _updateRewards();
+        } else if (block.timestamp > endTimestamp) {
+            revert STATE_NoRewardsLeft();
+        }
 
         // Do share accounting and populate user stake information
         (uint256 boost, ) = _getBoost(lock);
@@ -222,9 +233,9 @@ contract CellarStaking is ICellarStaking, Ownable {
             UserStake({
                 amount: uint112(amount),
                 amountWithBoost: uint112(amountWithBoost),
+                unbondTimestamp: 0,
                 rewardPerTokenPaid: uint112(rewardPerTokenStored),
                 rewards: 0,
-                unbondTimestamp: 0,
                 lock: lock
             })
         );
@@ -342,8 +353,8 @@ contract CellarStaking is ICellarStaking, Ownable {
 
         // Reinstate
         (uint256 boost, ) = _getBoost(s.lock);
-        uint256 amountWithBoost = s.amount + (s.amount * boost) / ONE;
-        uint256 depositAmountIncreased = amountWithBoost - s.amountWithBoost;
+        uint256 depositAmountIncreased = (s.amount * boost) / ONE;
+        uint256 amountWithBoost = s.amount + depositAmountIncreased;
 
         s.amountWithBoost = uint112(amountWithBoost);
         s.unbondTimestamp = 0;
@@ -410,7 +421,6 @@ contract CellarStaking is ICellarStaking, Ownable {
         _updateRewardForStake(msg.sender, depositId);
 
         // Start unstaking
-        uint256 amountWithBoost = s.amountWithBoost;
         reward = s.rewards;
 
         s.amount = 0;
@@ -418,8 +428,9 @@ contract CellarStaking is ICellarStaking, Ownable {
         s.rewards = 0;
 
         // Update global state
+        // Boosted amount same as deposit amount, since we have unbonded
         totalDeposits -= depositAmount;
-        totalDepositsWithBoost -= amountWithBoost;
+        totalDepositsWithBoost -= depositAmount;
 
         // Distribute stake
         stakingToken.safeTransfer(msg.sender, depositAmount);
@@ -499,11 +510,18 @@ contract CellarStaking is ICellarStaking, Ownable {
 
         UserStake[] storage userStakes = stakes[msg.sender];
         for (uint256 i = 0; i < userStakes.length; i++) {
+            if (claimable) _updateRewardForStake(msg.sender, i);
+
             UserStake storage s = userStakes[i];
             uint256 amount = s.amount;
 
             if (amount > 0) {
+                // Update global state
+                totalDeposits -= amount;
+                totalDepositsWithBoost -= s.amountWithBoost;
+
                 s.amount = 0;
+                s.amountWithBoost = 0;
 
                 stakingToken.transfer(msg.sender, amount);
 
@@ -527,6 +545,8 @@ contract CellarStaking is ICellarStaking, Ownable {
 
         UserStake[] storage userStakes = stakes[msg.sender];
         for (uint256 i = 0; i < userStakes.length; i++) {
+            _updateRewardForStake(msg.sender, i);
+
             UserStake storage s = userStakes[i];
 
             reward += s.rewards;
@@ -552,28 +572,34 @@ contract CellarStaking is ICellarStaking, Ownable {
      * @param reward                The amount of rewards to distribute per second.
      */
     function notifyRewardAmount(uint256 reward) external override onlyOwner updateRewards {
-        if (reward < epochDuration) revert USR_ZeroRewardsPerEpoch();
-
-        uint256 rewardBalance = distributionToken.balanceOf(address(this));
-        if (rewardBalance < reward) revert STATE_RewardsNotFunded(rewardBalance, reward);
-
-        if (block.timestamp >= endTimestamp) {
-            // Set new rate bc previous has already expired
-            rewardRate = reward / epochDuration;
-        } else {
+        if (block.timestamp < endTimestamp) {
             uint256 remaining = endTimestamp - block.timestamp;
             uint256 leftover = remaining * rewardRate;
-            rewardRate = (reward + leftover) / epochDuration;
+            reward += leftover;
         }
 
+        if (reward < nextEpochDuration) revert USR_ZeroRewardsPerEpoch();
+
+        uint256 rewardBalance = distributionToken.balanceOf(address(this));
+        uint256 pendingRewards = reward + rewardsReady;
+        if (rewardBalance < pendingRewards) revert STATE_RewardsNotFunded(rewardBalance, pendingRewards);
+
         // prevent overflow when computing rewardPerToken
-        if (rewardRate >= ((type(uint256).max / ONE) / epochDuration)) {
+        uint256 proposedRewardRate = reward / nextEpochDuration;
+        if (proposedRewardRate >= ((type(uint256).max / ONE) / nextEpochDuration)) {
             revert USR_RewardTooLarge();
         }
 
-        endTimestamp = block.timestamp + epochDuration;
+        if (totalDeposits == 0) {
+            // No deposits yet, so keep rewards pending until first deposit
+            // Incrementing in case it is called twice
+            rewardsReady += reward;
+        } else {
+            // Ready to start
+            _startProgram(reward);
+        }
 
-        emit Funding(reward, endTimestamp);
+        lastAccountingTimestamp = block.timestamp;
     }
 
     /**
@@ -582,8 +608,10 @@ contract CellarStaking is ICellarStaking, Ownable {
      * @param _epochDuration        The new duration for reward schedules.
      */
     function setRewardsDuration(uint256 _epochDuration) external override onlyOwner {
-        epochDuration = _epochDuration;
-        emit EpochDurationChange(epochDuration);
+        if (rewardsReady > 0) revert STATE_RewardsReady();
+
+        nextEpochDuration = _epochDuration;
+        emit EpochDurationChange(nextEpochDuration);
     }
 
     /**
@@ -616,16 +644,28 @@ contract CellarStaking is ICellarStaking, Ownable {
      * @param makeRewardsClaimable  Whether any previously accumulated rewards should be claimable.
      */
     function emergencyStop(bool makeRewardsClaimable) external override onlyOwner {
-        if (ended) revert STATE_AlreadyStopped();
+        if (ended) revert STATE_AlreadyShutdown();
 
         // Update state and put in irreversible emergency mode
         ended = true;
         claimable = makeRewardsClaimable;
+        uint256 amountToReturn = distributionToken.balanceOf(address(this));
 
-        if (!claimable) {
-            // Send distribution token back to owner
-            distributionToken.transfer(msg.sender, distributionToken.balanceOf(address(this)));
+        if (makeRewardsClaimable) {
+            // Update rewards one more time
+            _updateRewards();
+
+            // Return any remaining, since new calculation is stopped
+            uint256 remaining = endTimestamp > block.timestamp ? (endTimestamp - block.timestamp) * rewardRate : 0;
+
+            // Make sure any rewards except for remaining are kept for claims
+            uint256 amountToKeep = rewardRate * currentEpochDuration - remaining;
+
+            amountToReturn -= amountToKeep;
         }
+
+        // Send distribution token back to owner
+        distributionToken.transfer(msg.sender, amountToReturn);
 
         emit EmergencyStop(msg.sender, makeRewardsClaimable);
     }
@@ -647,16 +687,19 @@ contract CellarStaking is ICellarStaking, Ownable {
      * @dev    Sets rewardPerTokenStored.
      *
      *
-     * @return rewardPerToken           The latest time to calculate.
+     * @return newRewardPerTokenStored  The new rewards to distribute per token.
+     * @return latestTimestamp          The latest time to calculate.
      */
-    function rewardPerToken() public view override returns (uint256) {
-        if (totalDeposits == 0) return rewardPerTokenStored;
+    function rewardPerToken() public view override returns (uint256 newRewardPerTokenStored, uint256 latestTimestamp) {
+        latestTimestamp = latestRewardsTimestamp();
 
-        uint256 timeElapsed = latestRewardsTimestamp() - lastAccountingTimestamp;
+        if (totalDeposits == 0) return (rewardPerTokenStored, latestTimestamp);
+
+        uint256 timeElapsed = latestTimestamp - lastAccountingTimestamp;
         uint256 rewardsForTime = timeElapsed * rewardRate;
         uint256 newRewardsPerToken = (rewardsForTime * ONE) / totalDepositsWithBoost;
 
-        return rewardPerTokenStored + newRewardsPerToken;
+        newRewardPerTokenStored = rewardPerTokenStored + newRewardsPerToken;
     }
 
     /**
@@ -675,12 +718,10 @@ contract CellarStaking is ICellarStaking, Ownable {
     // ============================================ HELPERS ============================================
 
     /**
-     * @dev Update reward accounting for the global state totals.
+     * @dev Modifier to apply reward updates before functions that change accounts.
      */
     modifier updateRewards() {
-        rewardPerTokenStored = rewardPerToken();
-        lastAccountingTimestamp = latestRewardsTimestamp();
-
+        _updateRewards();
         _;
     }
 
@@ -691,6 +732,30 @@ contract CellarStaking is ICellarStaking, Ownable {
         if (paused) revert STATE_ContractPaused();
         if (ended) revert STATE_ContractKilled();
         _;
+    }
+
+    /**
+     * @dev Update reward accounting for the global state totals.
+     */
+    function _updateRewards() internal {
+        (rewardPerTokenStored, lastAccountingTimestamp) = rewardPerToken();
+    }
+
+    /**
+     * @dev On initial deposit, start the rewards program.
+     *
+     * @param reward                    The pending rewards to start distributing.
+     */
+    function _startProgram(uint256 reward) internal {
+        // Assumptions
+        // Total deposits are now (mod current tx), no ongoing program
+        // Rewards are already funded (since checked in notifyRewardAmount)
+
+        rewardRate = reward / nextEpochDuration;
+        endTimestamp = block.timestamp + nextEpochDuration;
+        currentEpochDuration = nextEpochDuration;
+
+        emit Funding(reward, endTimestamp);
     }
 
     /**
@@ -711,7 +776,7 @@ contract CellarStaking is ICellarStaking, Ownable {
      */
     function _earned(UserStake memory s) internal view returns (uint256) {
         uint256 rewardPerTokenAcc = rewardPerTokenStored - s.rewardPerTokenPaid;
-        uint256 newRewards = s.amountWithBoost * (rewardPerTokenAcc / ONE);
+        uint256 newRewards = (s.amountWithBoost * rewardPerTokenAcc) / ONE;
 
         return newRewards;
     }

@@ -1551,6 +1551,7 @@ __metadata:
     solhint-plugin-prettier: ^0.0.5
     solidity-coverage: ^0.7.17
     solidity-docgen: ^0.5.16
+    solmate: ^6.6.1
     ts-generator: ^0.1.1
     ts-node: ^10.4.0
     typechain: ^6.0.5
@@ -13638,6 +13639,13 @@ resolve@1.1.x:
   bin:
     solidity-docgen: dist/cli.js
   checksum: 9afcc901065f9ca15f561d7373aaeb9e4033aed2384efd47c4c1c7fe4ac3d24bc24bda41e10cdf92cc78477ea61fa85124b4653b3bb71995980c1a503c78904b
+  languageName: node
+  linkType: hard
+
+"solmate@npm:^6.6.1":
+  version: 6.6.1
+  resolution: "solmate@npm:6.6.1"
+  checksum: 8984eeabcc5e4b47bf37e3bc0c7fa9d358bf6cb0eb874be87572b841c9d61e8523be1e7221bdd36e87a84017ed5e08ca835728393e22ea5b7cd7be925904bf12
   languageName: node
   linkType: hard
 

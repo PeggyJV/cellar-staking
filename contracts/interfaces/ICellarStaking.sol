@@ -1,7 +1,7 @@
-// SPDX-License-Identifier: MIT
-pragma solidity >=0.8.4;
+// SPDX-License-Identifier: Apache-2.0
+pragma solidity 0.8.15;
 
-import {ERC20} from "@rari-capital/solmate/src/tokens/ERC20.sol";
+import { ERC20 } from "solmate/src/tokens/ERC20.sol";
 
 /**
  * @title Sommelier Staking Interface
@@ -34,9 +34,9 @@ interface ICellarStaking {
     struct UserStake {
         uint112 amount;
         uint112 amountWithBoost;
+        uint32 unbondTimestamp;
         uint112 rewardPerTokenPaid;
         uint112 rewards;
-        uint32 unbondTimestamp;
         Lock lock;
     }
 
@@ -46,7 +46,11 @@ interface ICellarStaking {
 
     function distributionToken() external returns (ERC20);
 
-    function epochDuration() external returns (uint256);
+    function currentEpochDuration() external returns (uint256);
+
+    function nextEpochDuration() external returns (uint256);
+
+    function rewardsReady() external returns (uint256);
 
     function minimumDeposit() external returns (uint256);
 
@@ -106,7 +110,7 @@ interface ICellarStaking {
 
     function latestRewardsTimestamp() external view returns (uint256);
 
-    function rewardPerToken() external view returns (uint256);
+    function rewardPerToken() external view returns (uint256, uint256);
 
     function getUserStakes(address user) external view returns (UserStake[] memory);
 }

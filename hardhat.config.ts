@@ -123,7 +123,7 @@ const config: HardhatUserConfig = {
   solidity: {
     compilers: [
       {
-        version: "0.8.10",
+        version: "0.8.15",
         settings: {
           metadata: {
             // Not including the metadata hash
@@ -134,7 +134,7 @@ const config: HardhatUserConfig = {
           // https://hardhat.org/hardhat-network/#solidity-optimizer-support
           optimizer: {
             enabled: optimizerEnabled,
-            runs: 999999,
+            runs: 200,
           },
         },
       },

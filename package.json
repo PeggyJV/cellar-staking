@@ -90,6 +90,7 @@
     "typechain": "cross-env TS_NODE_TRANSPILE_ONLY=true hardhat typechain"
   },
   "dependencies": {
-    "@rari-capital/solmate": "^6.2.0"
+    "@rari-capital/solmate": "^6.2.0",
+    "solmate": "^6.6.1"
   }
 }
