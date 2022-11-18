@@ -21,8 +21,12 @@ task("deploy:CellarStaking")
     const factory = <CellarStaking__factory>await ethers.getContractFactory("CellarStaking");
 
     const tokens = [
-      { name: "ETHBTCMOM", address: "0x6E2dAc3b9E9ADc0CbbaE2D0B9Fd81952a8D33872" }, // ETHBTCMOM
-      { name: "ETHBTCTREND", address: "0x6b7f87279982d919Bbf85182DDeAB179B366D8f2" }, // ETHBTCTREND
+      // { name: "ETHBTCMOM", address: "0x6E2dAc3b9E9ADc0CbbaE2D0B9Fd81952a8D33872" }, // ETHBTCMOM
+      // { name: "ETHBTCTREND", address: "0x6b7f87279982d919Bbf85182DDeAB179B366D8f2" }, // ETHBTCTREND
+      // { name: "AAVE", address: "0x7bAD5DF5E11151Dc5Ee1a648800057C5c934c0d5" },
+      // { name: "AAVE", address: "0x7bAD5DF5E11151Dc5Ee1a648800057C5c934c0d5" },
+      { name: "STEADYETH", address: "0x3F07A84eCdf494310D397d24c1C78B041D2fa622" },
+      { name: "STEADYBTC", address: "0x4986fD36b6b16f49b43282Ee2e24C5cF90ed166d" },
     ];
 
     for (const token of tokens) {
@@ -31,9 +35,9 @@ task("deploy:CellarStaking")
         token.address,                    // cellar lp token
         SOMM_TOKEN,                       // SOMM ERC20 token
         60 * 60 * 24 * 14,                // 14 days,
-        ethers.utils.parseUnits("0.3"),   // 30% short boost (0.75 factor)
-        ethers.utils.parseUnits("0.4"),   // 40% medium boost (1 factor)
-        ethers.utils.parseUnits("0.44"),  // 44% medium boost (1.1 factor)
+        ethers.utils.parseUnits("0.1"),   // 10% short boost
+        ethers.utils.parseUnits("0.2"),   // 20%% medium boost
+        ethers.utils.parseUnits("0.25"),  // 25% long boost
         oneDaySec * 10,                   // 10-day short locktime
         oneDaySec * 14,                   // 14-day medium locktime
         oneDaySec * 20,                   // 20-day long locktime
@@ -45,6 +49,5 @@ task("deploy:CellarStaking")
     }
 
     // Gravity needs to call:
-    // - set
     // - notifyRewardAmount to start staking program
   });
